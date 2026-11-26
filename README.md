@@ -2,6 +2,14 @@
 
 # wslim
 
+<p align="center">
+  <a href="https://github.com/4riful/wslim/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/4riful/wslim"></a>
+  <a href="https://github.com/4riful/wslim/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/4riful/wslim/total"></a>
+  <img alt="Windows Home supported" src="https://img.shields.io/badge/Windows%20Home-supported-2563eb">
+  <img alt="Size" src="https://img.shields.io/badge/size-120%20KB-2563eb">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/github/license/4riful/wslim"></a>
+</p>
+
 wslim is a small Windows app that looks inside your WSL distros for space that can safely be given back: package caches, build caches, old tool versions, old logs, Docker leftovers. It shows what it found, cleans what you tick, and then shrinks the WSL `.vhdx` disk files with `diskpart` so the space actually returns to your C: drive. It works with any WSL 2 distro (Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and others).
 
 ## Why it exists
