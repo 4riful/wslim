@@ -42,13 +42,13 @@ namespace Wslim
             {
                 C["BG"] = "#1E1E1E"; C["SURFACE"] = "#252525"; C["HOVER"] = "#2D2D2D"; C["LINE"] = "#363636";
                 C["TEXT"] = "#ECECEC"; C["MUTED"] = "#9B9B9B"; C["FAINT"] = "#6E6E6E";
-                C["ACCENT"] = "#4C8DFF"; C["ONACCENT"] = "#FFFFFF"; C["WARN"] = "#E5A54B"; C["GOOD"] = "#5BC489"; C["BAD"] = "#F07070";
+                C["ACCENT"] = "#2DD4BF"; C["ONACCENT"] = "#04201D"; C["WARN"] = "#E5A54B"; C["GOOD"] = "#5BC489"; C["BAD"] = "#F07070";
             }
             else
             {
                 C["BG"] = "#FFFFFF"; C["SURFACE"] = "#F6F6F6"; C["HOVER"] = "#EEEEEE"; C["LINE"] = "#E4E4E4";
                 C["TEXT"] = "#1B1B1B"; C["MUTED"] = "#6A6A6A"; C["FAINT"] = "#A0A0A0";
-                C["ACCENT"] = "#2463EB"; C["ONACCENT"] = "#FFFFFF"; C["WARN"] = "#A15C07"; C["GOOD"] = "#16803C"; C["BAD"] = "#C62828";
+                C["ACCENT"] = "#0D9488"; C["ONACCENT"] = "#FFFFFF"; C["WARN"] = "#A15C07"; C["GOOD"] = "#16803C"; C["BAD"] = "#C62828";
             }
         }
         public Brush B(string key)

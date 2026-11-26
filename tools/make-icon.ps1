@@ -1,35 +1,33 @@
-# Draws the wslim icon (same geometry as assets/wslim.svg): a tile cut diagonally. Linux half: a penguin.
-# Windows half: a terminal prompt with a mint "clean" cursor and a sparkle. Small sizes drop fine details.
+# Draws the wslim icon (same geometry as assets/wslim.svg): a Tux face (own drawing) peeking over a dark terminal
+# bar with a mint ">_" prompt, on teal. Small sizes drop the eye highlights and use a bolder prompt.
 # Usage: powershell -File tools\make-icon.ps1 -Out assets\wslim.ico
 param([Parameter(Mandatory)][string]$Out)
 Add-Type -AssemblyName PresentationCore, WindowsBase
 function Brush($hex) { $b = New-Object System.Windows.Media.SolidColorBrush ([Windows.Media.ColorConverter]::ConvertFromString($hex)); $b.Freeze(); $b }
 function Draw([int]$s) {
-    $k = $s / 64.0
+    $k = $s / 64.0; $small = $s -le 24
     $dv = New-Object System.Windows.Media.DrawingVisual
     $dc = $dv.RenderOpen()
     $dc.PushTransform((New-Object System.Windows.Media.ScaleTransform $k, $k))
     $dc.PushClip((New-Object System.Windows.Media.RectangleGeometry ([Windows.Rect]::new(2, 2, 60, 60)), 14, 14))
-    $small = $s -le 24
-    # Linux half: a penguin on pale amber
-    $dc.DrawGeometry((Brush "#FDE68A"), $null, [Windows.Media.Geometry]::Parse("M0,0 L61,0 L0,61 Z"))
-    $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(21, 25), 11, 14)
-    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(21, 29), 7, 9)
+    $dc.DrawRectangle((Brush "#0D9488"), $null, [Windows.Rect]::new(0, 0, 64, 64))
+    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(32, 37), 18, 20)
+    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(32, 42.5), 11.5, 7.5)
+    foreach ($x in 25.6, 38.4) { $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new($x, 28.5), 4.6, 5.8) }
+    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(26.6, 29.6), 2.3, 3.2)
+    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(37.4, 29.6), 2.3, 3.2)
     if (-not $small) {
-        foreach ($x in 18, 24) { $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new($x, 17), 2.6, 2.6) }
-        $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(18.6, 17.4), 1.2, 1.2)
-        $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(23.4, 17.4), 1.2, 1.2)
-        $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(15.5, 39), 4.2, 2.2)
-        $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(26, 39), 4.2, 2.2)
+        $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(27.3, 28.4), 0.8, 0.9)
+        $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(38.1, 28.4), 0.8, 0.9)
     }
-    $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(21, 21.5), 3.6, 2.2)
-    # Windows half: terminal prompt, mint cursor, sparkle
-    $dc.DrawGeometry((Brush "#2563EB"), $null, [Windows.Media.Geometry]::Parse("M64,3 L64,64 L3,64 Z"))
-    $pen = New-Object System.Windows.Media.Pen (Brush "#FFFFFF"), ($(if ($small) { 5 } else { 4 }))
+    $dc.DrawEllipse((Brush "#FBBF24"), $null, [Windows.Point]::new(32, 39.2), 5.2, 2.6)
+    $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(32, 37), 6.6, 3.1)
+    $dc.DrawRectangle((Brush "#0F172A"), $null, [Windows.Rect]::new(0, 44, 64, 20))
+    $dc.DrawRectangle((Brush "#1E293B"), $null, [Windows.Rect]::new(0, 44, 64, 1.5))
+    $pen = New-Object System.Windows.Media.Pen (Brush "#34D399"), ($(if ($small) { 4.2 } else { 3.4 }))
     $pen.StartLineCap = "Round"; $pen.EndLineCap = "Round"; $pen.LineJoin = "Round"
-    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M36,44 L43,50 L36,56"))
-    $dc.DrawRoundedRectangle((Brush "#6EE7B7"), $null, [Windows.Rect]::new(46, 52.5, 10, 4), 2, 2)
-    if (-not $small) { $dc.DrawGeometry((Brush "#FFFFFF"), $null, [Windows.Media.Geometry]::Parse("M53,30 Q53,36 59,36 Q53,36 53,42 Q53,36 47,36 Q53,36 53,30 Z")) }
+    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M12,49.5 L17,53.5 L12,57.5"))
+    $dc.DrawRoundedRectangle((Brush "#34D399"), $null, [Windows.Rect]::new(21, 55.5, 9, 3.4), 1.7, 1.7)
     $dc.Pop()
     $dc.Pop(); $dc.Close()
     $bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap $s, $s, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
