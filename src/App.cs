@@ -157,22 +157,22 @@ namespace Wslim
     </Grid>
 
     <Border DockPanel.Dock='Bottom' BorderBrush='{LINE}' BorderThickness='0,1,0,0'>
-      <Grid Margin='28,12'>
-        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>
-        <StackPanel VerticalAlignment='Center'>
-          <TextBlock x:Name='Status' Text='' Foreground='{MUTED}' TextTrimming='CharacterEllipsis'/>
-          <StackPanel Orientation='Horizontal' Margin='0,4,0,0'>
+      <StackPanel Margin='28,12'>
+        <TextBlock x:Name='Status' Text='' Foreground='{MUTED}' TextWrapping='Wrap' Margin='0,0,0,10'/>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>
+          <StackPanel Orientation='Horizontal' VerticalAlignment='Center'>
             <Button x:Name='LogBtn' Style='{StaticResource Link}' Content='Show log'/>
             <TextBlock Text='  ·  ' Foreground='{FAINT}'/>
             <Button x:Name='FolderBtn' Style='{StaticResource Link}' Content='Log folder'/>
           </StackPanel>
-        </StackPanel>
-        <StackPanel Grid.Column='1' Orientation='Horizontal' VerticalAlignment='Center'>
-          <CheckBox x:Name='ShrinkChk' Content='Shrink disks afterwards' IsChecked='True' Margin='0,0,20,0' VerticalAlignment='Center'/>
-          <Button x:Name='PreviewBtn' Style='{StaticResource Btn}' Content='Preview' Margin='0,0,8,0' MinWidth='88'/>
-          <Button x:Name='CleanBtn' Style='{StaticResource Primary}' Content='Clean' MinWidth='110'/>
-        </StackPanel>
-      </Grid>
+          <StackPanel Grid.Column='1' Orientation='Horizontal' VerticalAlignment='Center'>
+            <CheckBox x:Name='ShrinkChk' Content='Shrink disks afterwards' IsChecked='True' Margin='0,0,20,0' VerticalAlignment='Center'/>
+            <Button x:Name='PreviewBtn' Style='{StaticResource Btn}' Content='Preview' Margin='0,0,8,0' MinWidth='88'/>
+            <Button x:Name='CleanBtn' Style='{StaticResource Primary}' Content='Clean' MinWidth='110'/>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
     </Border>
 
     <Border x:Name='LogPane' DockPanel.Dock='Bottom' Height='190' Visibility='Collapsed' BorderBrush='{LINE}' BorderThickness='0,1,0,0' Background='{SURFACE}'>
@@ -681,9 +681,13 @@ namespace Wslim
     // ------------------------------------------------------------------ entry
     static class Program
     {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+
         [STAThread]
         static int Main(string[] args)
         {
+            // Own taskbar identity, so Windows shows this window's icon and not a cached one for the exe path.
+            try { SetCurrentProcessExplicitAppUserModelID("4riful.wslim.app"); } catch { }
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Log.Crash(e.ExceptionObject as Exception ?? new Exception("unknown"));
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
             app.DispatcherUnhandledException += (s, e) =>
