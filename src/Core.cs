@@ -18,8 +18,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("wslim")]
 [assembly: AssemblyProduct("wslim")]
 [assembly: AssemblyDescription("Clean WSL safely and shrink its disks")]
-[assembly: AssemblyVersion("1.2.2.0")]
-[assembly: AssemblyFileVersion("1.2.2.0")]
+[assembly: AssemblyVersion("1.2.3.0")]
+[assembly: AssemblyFileVersion("1.2.3.0")]
 
 namespace Wslim
 {
@@ -213,6 +213,59 @@ namespace Wslim
                 catch { }
             }
             var s = Sink; if (s != null) s(line);
+        }
+
+        static string TodayFile { get { return Path.Combine(LogDir, "wslim-" + DateTime.Now.ToString("yyyy-MM-dd") + ".log"); } }
+
+        // Housekeeping at start: keep today's log and the one before it, the last 50 history lines, and the end of
+        // the crash log. Leftover DiskPart scripts in %TEMP%\wslim go too. operation.json is never touched.
+        public static void Prune()
+        {
+            lock (Gate)
+            {
+                try
+                {
+                    if (Directory.Exists(LogDir))
+                        foreach (var f in Directory.GetFiles(LogDir, "wslim-*.log").OrderByDescending(x => Path.GetFileName(x)).Skip(2))
+                            try { File.Delete(f); } catch { }
+                    if (File.Exists(HistoryFile))
+                    {
+                        var lines = File.ReadAllLines(HistoryFile);
+                        if (lines.Length > 50) File.WriteAllLines(HistoryFile, lines.Skip(lines.Length - 50).ToArray(), Encoding.UTF8);
+                    }
+                    var crash = Path.Combine(Dir, "crash.log");
+                    if (File.Exists(crash) && new FileInfo(crash).Length > 256 * 1024)
+                    {
+                        var text = File.ReadAllText(crash);
+                        File.WriteAllText(crash, text.Substring(text.Length - 64 * 1024));
+                    }
+                    var tmp = Path.Combine(Path.GetTempPath(), "wslim");
+                    if (Directory.Exists(tmp))
+                        foreach (var f in Directory.GetFiles(tmp, "*.txt"))
+                            try { if (File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddDays(-1)) File.Delete(f); } catch { }
+                }
+                catch { }
+            }
+        }
+
+        // "Clear logs": deletes every log file except today's, plus the history and the crash log. Returns the count.
+        public static int Clear()
+        {
+            int n = 0;
+            lock (Gate)
+            {
+                try
+                {
+                    var today = TodayFile;
+                    if (Directory.Exists(LogDir))
+                        foreach (var f in Directory.GetFiles(LogDir, "wslim-*.log"))
+                            if (!string.Equals(f, today, StringComparison.OrdinalIgnoreCase)) try { File.Delete(f); n++; } catch { }
+                    foreach (var f in new[] { HistoryFile, Path.Combine(Dir, "crash.log") })
+                        if (File.Exists(f)) try { File.Delete(f); n++; } catch { }
+                }
+                catch { }
+            }
+            return n;
         }
 
         public static string HistoryFile { get { return Path.Combine(Dir, "history.tsv"); } }

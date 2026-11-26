@@ -61,6 +61,7 @@ Logs: {1}";
                 }
                 catch (Exception ex) { Log.Crash(ex); Log.Write("[worker] unexpected error: " + ex.Message); return 1; }
             }
+            Log.Prune();   // keep today's log and the previous one
             SetupOutput();
             try { return Run(args); }
             catch (Exception ex)

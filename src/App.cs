@@ -165,6 +165,8 @@ namespace Wslim
             <Button x:Name='LogBtn' Style='{StaticResource Link}' Content='Show log'/>
             <TextBlock Text='  ·  ' Foreground='{FAINT}'/>
             <Button x:Name='FolderBtn' Style='{StaticResource Link}' Content='Log folder'/>
+            <TextBlock Text='  ·  ' Foreground='{FAINT}'/>
+            <Button x:Name='ClearLogsBtn' Style='{StaticResource Link}' Content='Clear logs' ToolTip='Deletes old log files, the history and the crash log. Today&apos;s log is kept.'/>
           </StackPanel>
           <StackPanel Grid.Column='1' Orientation='Horizontal' VerticalAlignment='Center'>
             <CheckBox x:Name='ShrinkChk' Content='Shrink disks afterwards' IsChecked='True' Margin='0,0,20,0' VerticalAlignment='Center'/>
@@ -191,7 +193,7 @@ namespace Wslim
         readonly StackPanel Body;
         readonly TextBox LogBox;
         readonly TextBlock Status;
-        readonly Button ScanBtn, CleanBtn, PreviewBtn, LogBtn, FolderBtn;
+        readonly Button ScanBtn, CleanBtn, PreviewBtn, LogBtn, FolderBtn, ClearLogsBtn;
         readonly CheckBox ShrinkChk;
         readonly Border LogPane;
         List<Distro> Distros = new List<Distro>();
@@ -218,6 +220,7 @@ namespace Wslim
             PreviewBtn = (Button)W.FindName("PreviewBtn");
             LogBtn = (Button)W.FindName("LogBtn");
             FolderBtn = (Button)W.FindName("FolderBtn");
+            ClearLogsBtn = (Button)W.FindName("ClearLogsBtn");
             ShrinkChk = (CheckBox)W.FindName("ShrinkChk");
             LogPane = (Border)W.FindName("LogPane");
 
@@ -251,6 +254,13 @@ namespace Wslim
             CleanBtn.Click += (s, e) => Clean(false);
             PreviewBtn.Click += (s, e) => Clean(true);
             LogBtn.Click += (s, e) => ShowLog(LogPane.Visibility != Visibility.Visible);
+            ClearLogsBtn.Click += (s, e) =>
+            {
+                if (busy) return;
+                int n = Log.Clear();
+                LogBox.Clear();
+                Status.Text = n == 0 ? "No old logs to delete." : "Deleted " + n + " old log file(s). Today's log is kept.";
+            };
             FolderBtn.Click += (s, e) => { Directory.CreateDirectory(Log.LogDir); Process.Start("explorer.exe", "\"" + Log.LogDir + "\""); };
             ShrinkChk.Click += (s, e) => UpdateFooter();
             W.SourceInitialized += (s, e) => DarkTitleBar();
@@ -273,7 +283,7 @@ namespace Wslim
         void ShowLog(bool show)
         {
             LogPane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            LogBtn.Content = show ? "Hide log" : "Show log";
+            LogBtn.Content = Labeled(IcoLog, show ? "Hide log" : "Show log", 12);
         }
 
         void Ui(Action a) { W.Dispatcher.BeginInvoke(a); }
@@ -292,6 +302,13 @@ namespace Wslim
         // ---------------------------------------------------------------- flow
         void Start()
         {
+            ScanBtn.Content = Labeled(IcoScan, "Scan");
+            PreviewBtn.Content = Labeled(IcoPreview, "Preview");
+            CleanBtn.Content = Labeled(IcoClean, "Clean");
+            LogBtn.Content = Labeled(IcoLog, "Show log", 12);
+            FolderBtn.Content = Labeled(IcoFolder, "Log folder", 12);
+            ClearLogsBtn.Content = Labeled(IcoTrash, "Clear logs", 12);
+            Log.Prune();
             Log.Write("wslim started");
             // An unfinished shrink blocks everything, and nothing (not even wsl.exe) is run until it is resolved.
             var pending = Journal.Pending();
@@ -492,11 +509,40 @@ namespace Wslim
             if (weight.HasValue) t.FontWeight = weight.Value;
             return t;
         }
-        void Heading(string s, double top)
+        // Icons come from the icon font that ships with Windows (Segoe Fluent Icons on 11, Segoe MDL2 Assets on 10).
+        static readonly FontFamily IconFont = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");
+        const string IcoScan = "\uE721", IcoPreview = "\uE890", IcoClean = "\uEA99", IcoShrink = "\uE73F", IcoDone = "\uE73E",
+                     IcoDisk = "\uEDA2", IcoFound = "\uE773", IcoSafe = "\uEA18", IcoReview = "\uE7BA", IcoInfo = "\uE946",
+                     IcoLog = "\uE8A5", IcoFolder = "\uE8B7", IcoTrash = "\uE74D", IcoOk = "\uE930", IcoError = "\uEA39";
+
+        TextBlock Glyph(string glyph, double size, Brush brush)
+        {
+            var t = new TextBlock { Text = glyph, FontFamily = IconFont, FontSize = size, VerticalAlignment = VerticalAlignment.Center };
+            if (brush != null) t.Foreground = brush;
+            return t;
+        }
+        // Button content: icon + label. The text colour comes from the button, so both follow its state.
+        object Labeled(string glyph, string label, double size = 13)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal };
+            var g = Glyph(glyph, size, null); g.Margin = new Thickness(0, 1, 7, 0);
+            sp.Children.Add(g);
+            sp.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+            return sp;
+        }
+        FrameworkElement WithIcon(string glyph, string color, double size, FrameworkElement content)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal };
+            var g = Glyph(glyph, size, T.B(color)); g.Margin = new Thickness(0, 1, 8, 0);
+            sp.Children.Add(g); sp.Children.Add(content);
+            return sp;
+        }
+        void Heading(string s, double top, string glyph)
         {
             var t = Text(s.ToUpperInvariant(), "MUTED", 11, FontWeights.SemiBold);
-            t.Margin = new Thickness(0, top, 0, 8);
-            Body.Children.Add(t);
+            var row = WithIcon(glyph, "MUTED", 12, t);
+            row.Margin = new Thickness(0, top, 0, 8);
+            Body.Children.Add(row);
         }
         void Rule()
         {
@@ -511,13 +557,14 @@ namespace Wslim
             {
                 string color = resultOutcome == Outcome.Success ? "GOOD"
                              : (resultOutcome == Outcome.Failed || resultOutcome == Outcome.RecoveryRequired ? "BAD" : "WARN");
-                var banner = Text(resultBanner, color, 13, FontWeights.SemiBold);
+                bool good = resultOutcome == Outcome.Success || resultOutcome == Outcome.NoSpaceReclaimed;
+                var banner = WithIcon(good ? IcoOk : (color == "BAD" ? IcoError : IcoReview), color, 15, Text(resultBanner, color, 13, FontWeights.SemiBold));
                 banner.Margin = new Thickness(0, 6, 0, 0);
                 Body.Children.Add(banner);
             }
             if (blocked) { RenderRecovery(); return; }
 
-            Heading("Disks", 14);
+            Heading("Disks", 14, IcoDisk);
             Rule();
             if (Distros.Count == 0)
                 Body.Children.Add(Text("WSL is not installed, or no distributions are registered for this user.", "MUTED"));
@@ -525,14 +572,14 @@ namespace Wslim
 
             foreach (var d in Distros.Where(x => x.Scanned || x.Items.Count > 0 || x.Notes.Count > 0))
             {
-                Heading("Found in " + d.Name, 26);
+                Heading("Found in " + d.Name, 26, IcoFound);
                 var safe = d.Items.Where(i => i.Tier == "safe").ToList();
                 var review = d.Items.Where(i => i.Tier != "safe").ToList();
                 if (safe.Count == 0 && review.Count == 0)
                     Body.Children.Add(Text("Nothing worth cleaning here.", "MUTED"));
-                Group("Safe to clean", "Rebuilds itself when needed", safe, true);
-                Group("Review first", "Can be rebuilt, but costs time or a large download", review, false);
-                foreach (var n in d.Notes) { var t = Text(n, "WARN", 12); t.Margin = new Thickness(0, 10, 0, 0); Body.Children.Add(t); }
+                Group("Safe to clean", "Rebuilds itself when needed", safe, true, IcoSafe, "GOOD");
+                Group("Review first", "Can be rebuilt, but costs time or a large download", review, false, IcoReview, "WARN");
+                foreach (var n in d.Notes) { var t = WithIcon(IcoInfo, "WARN", 13, Text(n, "WARN", 12)); t.Margin = new Thickness(0, 10, 0, 0); Body.Children.Add(t); }
             }
 
             if (Distros.Any(d => d.Scanned))
@@ -550,7 +597,7 @@ namespace Wslim
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var left = new StackPanel();
-            left.Children.Add(Text(d.Name, "TEXT", 13, FontWeights.SemiBold));
+            left.Children.Add(WithIcon(IcoDisk, d.Running ? "ACCENT" : "FAINT", 14, Text(d.Name, "TEXT", 13, FontWeights.SemiBold)));
             var meta = new List<string>();
             if (d.Os != null) meta.Add(d.Os);
             meta.Add(d.Running ? "running" : "stopped");
@@ -584,7 +631,7 @@ namespace Wslim
             return wrap;
         }
 
-        void Group(string title, string hint, List<Item> items, bool checkedByDefault)
+        void Group(string title, string hint, List<Item> items, bool checkedByDefault, string glyph, string glyphColor)
         {
             if (items.Count == 0) return;
             var head = new Grid { Margin = new Thickness(0, 6, 0, 2) };
@@ -593,7 +640,7 @@ namespace Wslim
             var ht = new TextBlock();
             ht.Inlines.Add(new System.Windows.Documents.Run(title) { FontWeight = FontWeights.SemiBold, Foreground = T.B("TEXT") });
             ht.Inlines.Add(new System.Windows.Documents.Run("   " + hint) { Foreground = T.B("FAINT"), FontSize = 12 });
-            head.Children.Add(ht);
+            head.Children.Add(WithIcon(glyph, glyphColor, 14, ht));
             var total = Text(Fmt.Size(items.Sum(i => i.Bytes)), "MUTED", 12);
             total.HorizontalAlignment = HorizontalAlignment.Right; Grid.SetColumn(total, 1);
             head.Children.Add(total);
@@ -648,8 +695,8 @@ namespace Wslim
         {
             if (busy) return;
             var picked = Distros.SelectMany(d => d.Items).Where(Ticked).ToList();
-            CleanBtn.Content = picked.Count > 0 ? "Clean " + Fmt.Size(picked.Sum(i => i.Bytes))
-                             : (ShrinkChk.IsChecked == true ? (shrunk ? "\u2713 Shrunk" : "Shrink disks") : "Clean");
+            CleanBtn.Content = picked.Count > 0 ? Labeled(IcoClean, "Clean " + Fmt.Size(picked.Sum(i => i.Bytes)))
+                             : (ShrinkChk.IsChecked == true ? (shrunk ? Labeled(IcoDone, "Shrunk") : Labeled(IcoShrink, "Shrink disks")) : Labeled(IcoClean, "Clean"));
             // After a finished shrink there is nothing left to shrink until something is cleaned or scanned again.
             CleanBtn.IsEnabled = !(shrunk && picked.Count == 0 && ShrinkChk.IsChecked == true);
             if (text != null) Status.Text = text;

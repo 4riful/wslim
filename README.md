@@ -144,7 +144,9 @@ Everything wslim does is written to `%LOCALAPPDATA%\wslim`:
 - `history.tsv`: one line per clean, with the space freed
 - `crash.log`: details of unexpected errors
 
-The **Log folder** link in the app opens this folder.
+wslim keeps its own logs small: at every start it keeps today's log and the one before it, the last 50 history lines
+and the end of the crash log, and deletes the rest. **Clear logs** in the app deletes everything except today's log.
+The **Log folder** link opens this folder.
 
 ## Build from source
 
