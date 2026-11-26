@@ -68,7 +68,12 @@ The full list of rules is in [docs/RULES.md](docs/RULES.md).
 
 ## Install
 
-Download from the [latest release](../../releases/latest):
+```powershell
+winget install 4riful.wslim        # once the winget review is merged
+scoop bucket add 4riful https://github.com/4riful/scoop-bucket; scoop install wslim
+```
+
+Or download from the [latest release](../../releases/latest):
 
 | File | Size | What |
 |---|---|---|
