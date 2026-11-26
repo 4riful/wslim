@@ -1138,7 +1138,7 @@ namespace Wslim
                 return r;
             }
 
-            host.Write(preview ? "Preview (nothing is changed)" : "Clean started");
+            host.Write(preview ? "Preview (nothing is changed)" : (picked.Count > 0 ? "Clean started" : "Shrink started"));
             long freed = 0;
             foreach (var g in picked.GroupBy(i => i.Distro))
             {

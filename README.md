@@ -2,25 +2,18 @@
 
 # wslim
 
-> [!CAUTION]
-> **All releases up to v1.1.3 are withdrawn. Do not use their "Shrink disks" step.**
-> A bug in the disk script left the WSL disk attached to Windows, after which WSL fails to start with
-> `ERROR_SHARING_VIOLATION`. The downloads were removed and a fixed version is in progress.
-> If you already ran it, recover in an elevated PowerShell (no data is lost; the disk was attached read-only):
->
-> ```powershell
-> wsl --shutdown
-> Get-DiskImage -ImagePath "C:\path\to\ext4.vhdx" | Format-List Attached,DevicePath
-> Dismount-DiskImage -ImagePath "C:\path\to\ext4.vhdx"
-> ```
->
-> Details: [incident report](WSLIM_COMPACTION_INCIDENT_REPORT.md).
+> [!IMPORTANT]
+> **Use v1.2.2 or later.** Versions up to v1.1.3 were withdrawn: their shrink step left the WSL disk attached to
+> Windows, and WSL then failed to start with `ERROR_SHARING_VIOLATION`. If that happened to you, run
+> `wsl --shutdown` and then `Dismount-DiskImage -ImagePath "C:\path\to\ext4.vhdx"` in an elevated PowerShell
+> (the disk was attached read-only; no data is lost). What went wrong and what changed:
+> [incident report](WSLIM_COMPACTION_INCIDENT_REPORT.md).
 
 <p align="center">
   <a href="https://github.com/4riful/wslim/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/4riful/wslim"></a>
   <a href="https://github.com/4riful/wslim/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/4riful/wslim/total"></a>
-  <img alt="Windows Home supported" src="https://img.shields.io/badge/Windows%20Home-supported-2563eb">
-  <img alt="Size" src="https://img.shields.io/badge/size-120%20KB-2563eb">
+  <img alt="Windows Home supported" src="https://img.shields.io/badge/Windows%20Home-supported-0d9488">
+  <img alt="Size" src="https://img.shields.io/badge/size-189%20KB-0d9488">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/github/license/4riful/wslim"></a>
 </p>
 
@@ -51,7 +44,7 @@ databases or models), cleaning them, shutting WSL down, and running `diskpart` a
 loses data; skipping the `diskpart` step frees nothing on Windows.
 
 wslim does that whole job, with a rule catalog that knows the difference, and shows you everything before it touches
-anything. On that first machine it gave back 27 GB.
+anything.
 
 ## How it works
 
@@ -62,8 +55,10 @@ anything. On that first machine it gave back 27 GB.
    It reports each finding with a tier, a size and the exact paths.
 3. **Clean**: sends back the exact paths you ticked. A path is deleted only if it was in the scan, you ticked it,
    and the rule still matches it now. Then `fstrim` tells Windows which blocks are free.
-4. **Shrink**: shuts WSL down and runs `diskpart` `compact vdisk` on each disk, after one UAC prompt. This is the step
-   that returns space to C:.
+4. **Shrink**: asks first, shuts WSL down, and compacts each disk with `diskpart` (`select vdisk` + `compact vdisk`)
+   behind one UAC prompt. The disk is never attached to Windows. Before it starts, wslim checks that WSL is really
+   stopped and that nothing holds the disk; afterwards it checks the disk is free again, then starts the distros
+   that were running. This is the step that returns space to C:.
 
 The diagram source is [docs/how-it-works.excalidraw](docs/how-it-works.excalidraw).
 
@@ -82,14 +77,16 @@ The full list of rules is in [docs/RULES.md](docs/RULES.md).
 
 ## Install
 
-Installation is paused until the fixed version is released.
+```powershell
+scoop bucket add 4riful https://github.com/4riful/scoop-bucket; scoop install wslim
+```
 
 Or download from the [latest release](../../releases/latest):
 
 | File | Size | What |
 |---|---|---|
-| `wslim.exe` | ~120 KB | The app |
-| `wslim-cli.exe` | ~60 KB | The same engine without a window, for terminals and scripts |
+| `wslim.exe` | ~189 KB | The app |
+| `wslim-cli.exe` | ~112 KB | The same engine without a window, for terminals and scripts |
 
 - Windows 10 or 11 with WSL 2, any edition including Home.
 - .NET Framework 4.8 is built into Windows; nothing else to install. No installer.
@@ -102,7 +99,16 @@ Or download from the [latest release](../../releases/latest):
 3. Optionally click **Preview** to see the exact commands, without changing anything.
 4. Click **Clean**. wslim always asks before it stops WSL, and lists which distros are running. Only the exact folders shown in the scan and ticked are removed; anything that appeared after the scan is left alone. Hover an item to see its paths.
 
-**Shrink disks afterwards** (on by default) runs after cleaning. It shuts WSL down (`wsl --shutdown`), so terminals, VS Code, Claude Code and containers running in WSL will close; save your work first. It then runs `diskpart` (`compact vdisk`) on each disk after one UAC prompt. Disks of Docker Desktop, Rancher Desktop and Podman are only shrunk, never cleaned, and are skipped while Docker Desktop is running. Disks that are sparse files are skipped, because Windows shrinks those itself.
+**Shrink disks afterwards** (on by default) runs after cleaning. `wsl --shutdown` stops **all** distros, so
+terminals, VS Code, Claude Code and containers running in WSL close; save your work first. wslim names the running
+distros before it asks, and starts them again when the shrink is verified safe.
+
+Every run ends with one of six results: **Success**, **No space reclaimed**, **Partial success**, **Failed**,
+**Cancelled** or **Recovery required**. If wslim cannot verify that a disk is free again, it stops, shows the exact
+recovery commands, and blocks further runs until the check passes (`wslim-cli recover`, or the button in the app).
+
+Disks of Docker Desktop, Rancher Desktop and Podman are only shrunk, never cleaned, and are skipped while Docker
+Desktop is running. Sparse disks are skipped, because Windows shrinks those itself.
 
 ## Command line (no window)
 
@@ -115,11 +121,12 @@ wslim-cli clean --preview               show what a clean of all safe items woul
 wslim-cli clean --shrink                clean safe items, stop WSL, shrink the disks
 wslim-cli clean --ids npm,gomod         clean exactly these items (review items only this way)
 wslim-cli shrink                        only shrink the disks
+wslim-cli recover                       after an interrupted shrink: read-only disk check
 ```
 
 Options: `--distro NAME` limits to one distro, `--yes` skips the confirmation. Without `--yes`, every command that changes
-something prints its plan, lists the distros that will be stopped, and asks `[y/N]`. Exit codes: 0 ok, 1 error or
-cancelled, 2 usage.
+something prints its plan, lists the distros that will be stopped, and asks `[y/N]`. Exit codes: 0 success or no space
+reclaimed, 1 failed, partial or cancelled, 2 usage, 3 recovery required.
 
 ## What it never touches
 
@@ -142,6 +149,9 @@ The **Log folder** link in the app opens this folder.
 ## Build from source
 
 On Windows, run `build.cmd`. It uses the C# compiler that ships with Windows (.NET Framework 4.8), so no SDK is needed. The result is `bin\wslim.exe`.
+
+Tests: `bin\wslim-tests.exe` (unit tests with a fake machine) and, on CI only, `--integration` on throw-away VHDX
+files.
 
 From inside WSL, run `./build.sh`. It copies the sources to a temp folder on C: and runs `build.cmd` there.
 

@@ -390,3 +390,15 @@ purpose, never `UbuntuRestored`) must pass before any release.
 10. All tests in section 8 pass on CI, including the disposable-VHDX integration job.
 11. One full manual run on a disposable WSL distro passes before release; `UbuntuRestored` is never used for testing.
 12. No commit, push, release or post without your explicit approval.
+
+---
+
+## 11. Resolution (2026-11-27)
+
+- Fixed in v1.2.0-v1.2.2 as designed in section 6.1: `select vdisk` + `compact vdisk`, the disk is never attached.
+- Automated tests: 38 unit tests with a fake machine; integration tests with real DiskPart on throw-away VHDX files
+  in CI (both modes, disk verified free afterwards).
+- First run on a real WSL disk, by the owner on the affected machine: 44.6 GB → 44.0 GB, outcome Success, disk
+  verified free, distro started again automatically. Log: 02:28:33-02:29:03.
+- Still not exercised on a real machine: the Recovery required screen, `wslim-cli recover`, UAC decline, timeouts,
+  multi-disk runs, and elevation under a different administrator account.

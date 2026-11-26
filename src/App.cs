@@ -388,7 +388,7 @@ namespace Wslim
             if (busy || blocked) return;
             var targets = Distros.Where(d => !d.Managed).ToList();
             if (targets.Count == 0) { ScanDone.Set(); return; }
-            resultBanner = null;
+            resultBanner = null; shrunk = false;
             SetBusy(true, "Scanning…");
             Log.Write("Scan started");
             foreach (var d in targets) { d.Items = new List<Item>(); d.Notes = new List<string>(); d.Scanned = false; }
@@ -478,6 +478,7 @@ namespace Wslim
             foreach (var d in Distros) { var dd = d; if (r.CleanedOk.Contains(dd)) dd.Items = dd.Items.Where(i => !picked.Contains(i)).ToList(); }
             resultOutcome = r.Outcome;
             resultBanner = r.Banner;
+            shrunk = r.Returned >= 0 && (r.Outcome == Outcome.Success || r.Outcome == Outcome.NoSpaceReclaimed);
             if (r.Outcome == Outcome.RecoveryRequired) { EnterRecovery(r.RecoveryLines); return; }
             Render();
             SetBusy(false, resultBanner);
@@ -572,7 +573,7 @@ namespace Wslim
                     long gap = Math.Max(0, d.FileSize - d.Used);
                     var sub = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, FontSize = 12 };
                     sub.Inlines.Add(new System.Windows.Documents.Run(Fmt.Size(d.Used) + " used · ") { Foreground = T.B("MUTED") });
-                    sub.Inlines.Add(new System.Windows.Documents.Run(Fmt.Size(gap) + " can be given back") { Foreground = T.B(gap > (1L << 30) ? "GOOD" : "MUTED") });
+                    sub.Inlines.Add(new System.Windows.Documents.Run("up to " + Fmt.Size(gap) + " can be given back") { Foreground = T.B(gap > (1L << 30) ? "GOOD" : "MUTED") });
                     right.Children.Add(sub);
                 }
             }
@@ -641,12 +642,16 @@ namespace Wslim
             return false;
         }
 
+        bool shrunk;   // a shrink finished in this window and nothing was cleaned since
+
         void UpdateFooter(string text = null)
         {
             if (busy) return;
             var picked = Distros.SelectMany(d => d.Items).Where(Ticked).ToList();
             CleanBtn.Content = picked.Count > 0 ? "Clean " + Fmt.Size(picked.Sum(i => i.Bytes))
-                             : (ShrinkChk.IsChecked == true ? "Shrink disks" : "Clean");
+                             : (ShrinkChk.IsChecked == true ? (shrunk ? "\u2713 Shrunk" : "Shrink disks") : "Clean");
+            // After a finished shrink there is nothing left to shrink until something is cleaned or scanned again.
+            CleanBtn.IsEnabled = !(shrunk && picked.Count == 0 && ShrinkChk.IsChecked == true);
             if (text != null) Status.Text = text;
             else if (Distros.Any(d => d.Scanned))
             {
@@ -654,7 +659,7 @@ namespace Wslim
                 if (ShrinkChk.IsChecked == true)
                 {
                     long reclaim = Distros.Where(d => d.HasDisk && !d.Sparse && d.Used >= 0 && d.FileSize > 0).Sum(d => Math.Max(0, d.FileSize - d.Used));
-                    Status.Text = string.Format("{0} selected · Windows gets back about {1} after shrinking", Fmt.Size(sel), Fmt.Size(reclaim + sel));
+                    Status.Text = string.Format("{0} selected · Windows gets back up to {1} after shrinking", Fmt.Size(sel), Fmt.Size(reclaim + sel));
                 }
                 else Status.Text = string.Format("{0} selected · freed inside WSL only; the disk file on Windows keeps its size until you shrink it", Fmt.Size(sel));
             }
