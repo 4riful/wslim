@@ -2,6 +2,20 @@
 
 # wslim
 
+> [!CAUTION]
+> **All releases up to v1.1.3 are withdrawn. Do not use their "Shrink disks" step.**
+> A bug in the disk script left the WSL disk attached to Windows, after which WSL fails to start with
+> `ERROR_SHARING_VIOLATION`. The downloads were removed and a fixed version is in progress.
+> If you already ran it, recover in an elevated PowerShell (no data is lost; the disk was attached read-only):
+>
+> ```powershell
+> wsl --shutdown
+> Get-DiskImage -ImagePath "C:\path\to\ext4.vhdx" | Format-List Attached,DevicePath
+> Dismount-DiskImage -ImagePath "C:\path\to\ext4.vhdx"
+> ```
+>
+> Details: [incident report](WSLIM_COMPACTION_INCIDENT_REPORT.md).
+
 <p align="center">
   <a href="https://github.com/4riful/wslim/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/4riful/wslim"></a>
   <a href="https://github.com/4riful/wslim/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/4riful/wslim/total"></a>
@@ -68,10 +82,7 @@ The full list of rules is in [docs/RULES.md](docs/RULES.md).
 
 ## Install
 
-```powershell
-winget install 4riful.wslim        # once the winget review is merged
-scoop bucket add 4riful https://github.com/4riful/scoop-bucket; scoop install wslim
-```
+Installation is paused until the fixed version is released.
 
 Or download from the [latest release](../../releases/latest):
 
