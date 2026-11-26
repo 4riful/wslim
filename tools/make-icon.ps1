@@ -1,5 +1,5 @@
-# Draws the wslim icon (same geometry as assets/wslim.svg): a Tux face (own drawing) peeking over a dark terminal
-# bar with a mint ">_" prompt, on teal. Small sizes drop the eye highlights and use a bolder prompt.
+# Draws the wslim icon (same geometry as assets/wslim.svg): a winking penguin face (own drawing) peeking over a dark
+# terminal bar with a centered mint ">_" prompt, on teal. Small sizes drop the blush and eye shine, and use a bolder prompt.
 # Usage: powershell -File tools\make-icon.ps1 -Out assets\wslim.ico
 param([Parameter(Mandatory)][string]$Out)
 Add-Type -AssemblyName PresentationCore, WindowsBase
@@ -11,23 +11,23 @@ function Draw([int]$s) {
     $dc.PushTransform((New-Object System.Windows.Media.ScaleTransform $k, $k))
     $dc.PushClip((New-Object System.Windows.Media.RectangleGeometry ([Windows.Rect]::new(2, 2, 60, 60)), 14, 14))
     $dc.DrawRectangle((Brush "#0D9488"), $null, [Windows.Rect]::new(0, 0, 64, 64))
-    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(32, 37), 18, 20)
-    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(32, 42.5), 11.5, 7.5)
-    foreach ($x in 25.6, 38.4) { $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new($x, 28.5), 4.6, 5.8) }
-    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(26.6, 29.6), 2.3, 3.2)
-    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(37.4, 29.6), 2.3, 3.2)
-    if (-not $small) {
-        $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(27.3, 28.4), 0.8, 0.9)
-        $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(38.1, 28.4), 0.8, 0.9)
-    }
-    $dc.DrawEllipse((Brush "#FBBF24"), $null, [Windows.Point]::new(32, 39.2), 5.2, 2.6)
-    $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(32, 37), 6.6, 3.1)
-    $dc.DrawRectangle((Brush "#0F172A"), $null, [Windows.Rect]::new(0, 44, 64, 20))
-    $dc.DrawRectangle((Brush "#1E293B"), $null, [Windows.Rect]::new(0, 44, 64, 1.5))
+    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(32, 36), 21, 21)
+    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(25.5, 33), 8.6, 9.6)
+    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(38.5, 33), 8.6, 9.6)
+    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(32, 40), 12, 7)
+    if (-not $small) { foreach ($x in 21.5, 42.5) { $dc.DrawEllipse((Brush "#FDA4AF"), $null, [Windows.Point]::new($x, 38.6), 3.2, 2) } }
+    $dc.DrawEllipse((Brush "#0B0F19"), $null, [Windows.Point]::new(26, 31), 3.3, 4.2)
+    if (-not $small) { $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(27.2, 29.5), 1.3, 1.4) }
+    $wink = New-Object System.Windows.Media.Pen (Brush "#0B0F19"), 2.4; $wink.StartLineCap = "Round"; $wink.EndLineCap = "Round"
+    $dc.DrawGeometry($null, $wink, [Windows.Media.Geometry]::Parse("M35.5,31.5 Q38.5,27.5 41.5,31.5"))
+    $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(32, 37.6), 4.6, 2.6)
+    $dc.DrawEllipse((Brush "#FBBF24"), $null, [Windows.Point]::new(32, 39.4), 3.2, 1.6)
+    $dc.DrawRectangle((Brush "#0F172A"), $null, [Windows.Rect]::new(0, 45, 64, 19))
+    $dc.DrawRectangle((Brush "#1E293B"), $null, [Windows.Rect]::new(0, 45, 64, 1.5))
     $pen = New-Object System.Windows.Media.Pen (Brush "#34D399"), ($(if ($small) { 4.2 } else { 3.4 }))
     $pen.StartLineCap = "Round"; $pen.EndLineCap = "Round"; $pen.LineJoin = "Round"
-    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M12,49.5 L17,53.5 L12,57.5"))
-    $dc.DrawRoundedRectangle((Brush "#34D399"), $null, [Windows.Rect]::new(21, 55.5, 9, 3.4), 1.7, 1.7)
+    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M23,50.5 L28,54.5 L23,58.5"))
+    $dc.DrawRoundedRectangle((Brush "#34D399"), $null, [Windows.Rect]::new(32, 56.5, 9, 3.4), 1.7, 1.7)
     $dc.Pop()
     $dc.Pop(); $dc.Close()
     $bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap $s, $s, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)

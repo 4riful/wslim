@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/wslim.svg?v=1.1.2" width="112" alt="wslim icon"></p>
+<p align="center"><img src="assets/wslim.svg?v=1.1.3" width="112" alt="wslim icon"></p>
 
 # wslim
 
