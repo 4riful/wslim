@@ -357,7 +357,7 @@ purpose, never `UbuntuRestored`) must pass before any release.
 
 | # | Question | How it gets answered |
 |---|---|---|
-| Q1 | Does `compact vdisk` on a *detached* ext4 VHDX reclaim the same space as read-only attached? Documentation allows both but does not compare them. | Measure on a disposable VHDX with a trimmed ext4 filesystem, both modes. Decides 6.1 vs 6.5. |
+| Q1 | Does `compact vdisk` on a *detached* VHDX reclaim the same space as read-only attached? | **Answered 2026-11-27 (GitHub Actions run on `windows-latest`, disposable 1 GB VHDX files, branch `experiment/compact-modes`).** A disk with no Windows-readable filesystem (as ext4 appears to Windows), 400 MB written then 300 MB zeroed: 420 MB → 132 MB detached, 420 MB → 132 MB attached read-only. Identical, so the detached design (6.1) is adopted. The same run reproduced the incident: the released script exited `-2147024809` and left the test disk attached (`Attached = True`). Not yet measured on a real ext4 disk trimmed by WSL. |
 | Q2 | Can attachment state be read without elevation on Windows Home (`Get-DiskImage`, or `OpenVirtualDisk` + `GetVirtualDiskInformation`)? | Test on Home. If not, the startup check needs elevation only when a journal exists. |
 | Q3 | Is the exclusive-open probe a reliable "nothing holds this disk" signal for a VHDX the VM service has released? | Integration test. |
 | Q4 | Why did runs 2-4 return `E_INVALIDARG` for a sharing violation? | Capture DiskPart exit codes in tests; cosmetic. |

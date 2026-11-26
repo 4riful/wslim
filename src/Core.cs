@@ -1,4 +1,5 @@
 // wslim core: everything that is not UI. Shared by wslim.exe (App.cs) and wslim-cli.exe (Cli.cs).
+// Shrinking the disks (compaction) lives in Compact.cs.
 // .NET Framework 4.8, C# 5 so the compiler that ships with Windows can build it. No WPF here.
 using System;
 using System.Collections.Generic;
@@ -17,8 +18,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("wslim")]
 [assembly: AssemblyProduct("wslim")]
 [assembly: AssemblyDescription("Clean WSL safely and shrink its disks")]
-[assembly: AssemblyVersion("1.1.3.0")]
-[assembly: AssemblyFileVersion("1.1.3.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace Wslim
 {
@@ -26,6 +27,7 @@ namespace Wslim
     class Distro
     {
         public string Name, BasePath, VhdPath, Os;
+        public string Error;   // why the last scan, preview or clean of this distro failed (null when it worked)
         public int Version;
         public bool Running, Managed, Sparse, Scanned;
         public long FileSize = -1, Used = -1;
@@ -49,7 +51,17 @@ namespace Wslim
     // ------------------------------------------------------------------ WSL access
     static class Wsl
     {
-        public static List<Distro> List()
+        public static bool IsManagedName(string name)
+        {
+            return name.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("rancher-desktop", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("podman-machine", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public const string DockerDataName = "Docker Desktop data";
+
+        // What the registry says is registered for this user. Reads the registry and the file system only; never runs wsl.exe.
+        public static List<Distro> Registered()
         {
             var list = new List<Distro>();
             using (var root = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
@@ -66,9 +78,7 @@ namespace Wslim
                         var vhd = k.GetValue("VhdFileName") as string ?? "ext4.vhdx";
                         int ver = 2; object v = k.GetValue("Version"); if (v is int) ver = (int)v;
                         var d = new Distro { Name = name, BasePath = basePath, Version = ver };
-                        d.Managed = name.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase)
-                                 || name.StartsWith("rancher-desktop", StringComparison.OrdinalIgnoreCase)
-                                 || name.StartsWith("podman-machine", StringComparison.OrdinalIgnoreCase);
+                        d.Managed = IsManagedName(name);
                         if (ver == 2 && basePath.Length > 0) d.VhdPath = Path.Combine(basePath, vhd);
                         list.Add(d);
                     }
@@ -77,14 +87,21 @@ namespace Wslim
             // Docker Desktop keeps its data disk outside the registered folder on newer versions.
             var dd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Docker\wsl\disk\docker_data.vhdx");
             if (File.Exists(dd) && !list.Any(x => string.Equals(x.VhdPath, dd, StringComparison.OrdinalIgnoreCase)))
-                list.Add(new Distro { Name = "Docker Desktop data", VhdPath = dd, Version = 2, Managed = true });
+                list.Add(new Distro { Name = DockerDataName, VhdPath = dd, Version = 2, Managed = true });
+            return list;
+        }
+
+        public static List<Distro> List()
+        {
+            var list = Registered();
             Refresh(list);
             return list.OrderBy(x => x.Managed).ThenBy(x => x.Name).ToList();
         }
 
         public static void Refresh(List<Distro> list)
         {
-            var running = RunningNames();
+            bool ok;
+            var running = RunningNames(out ok);
             foreach (var d in list)
             {
                 d.Running = running.Contains(d.Name);
@@ -97,14 +114,21 @@ namespace Wslim
             }
         }
 
-        public static HashSet<string> RunningNames()
+        // The names of the running distros. ok is false when wsl.exe could not be asked (failed or timed out):
+        // the returned set is then empty and means "unknown", never "nothing is running".
+        public static HashSet<string> RunningNames(out bool ok)
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var sb = new StringBuilder();
-            Run("wsl.exe", "--list --running --quiet", null, l => sb.AppendLine(l), 15000);
+            int rc;
+            try { rc = Run("wsl.exe", "--list --running --quiet", null, l => sb.AppendLine(l), 15000); }
+            catch { rc = -1; }
+            ok = rc == 0;
+            if (!ok) return set;
             foreach (var l in sb.ToString().Split('\n'))
             {
                 var t = l.Replace("\0", "").Replace("\uFEFF", "").Trim();
+                if (t.StartsWith("ERR\t")) continue;
                 if (t.Length > 0 && !t.Contains(" ")) set.Add(t);
             }
             return set;
@@ -170,7 +194,9 @@ namespace Wslim
     {
         public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wslim");
         public static readonly string LogDir = Path.Combine(Dir, "logs");
+#pragma warning disable 649   // not set by the tests
         public static Action<string> Sink;   // receives "HH:mm:ss  text"
+#pragma warning restore 649
         static readonly object Gate = new object();
 
         public static void Write(string text)
@@ -233,7 +259,7 @@ namespace Wslim
         }
     }
 
-    // ------------------------------------------------------------------ scan, clean, shrink
+    // ------------------------------------------------------------------ scan and clean (shrinking: Compact.cs)
     static class Core
     {
         public static string Version
@@ -246,10 +272,13 @@ namespace Wslim
         {
             var dd = d;
             var items = new List<Item>(); var notes = new List<string>(); long used = -1; string os = null;
+            bool spoke = false; var said = new List<string>();   // spoke: the agent answered, so the distro did start
+            d.Error = null;
             int rc;
             try { rc = Wsl.Run("wsl.exe", "-d " + d.Name + " -u root -- sh -s scan", agent, line =>
             {
                 var f = line.Split('\t');
+                if (f[0] == "ITEM" || f[0] == "INFO" || f[0] == "NOTE") spoke = true;
                 if (f[0] == "ITEM" && f.Length >= 7)
                 {
                     long b; long.TryParse(f[3], out b);
@@ -257,37 +286,61 @@ namespace Wslim
                 }
                 else if (f[0] == "INFO" && f.Length >= 3) { if (f[1] == "used") long.TryParse(f[2], out used); else if (f[1] == "os") os = f[2]; }
                 else if (f[0] == "NOTE" && f.Length >= 2) notes.Add(f[1]);
-                else if (f[0] == "ERR") Log.Write("  " + dd.Name + ": " + line.Substring(4));
-                else if (line.Trim().Length > 0) Log.Write("  " + dd.Name + ": " + line.Trim());
+                else if (f[0] == "ERR") { lock (said) said.Add(line.Substring(4).Trim()); Log.Write("  " + dd.Name + ": " + line.Substring(4)); }
+                else if (line.Trim().Length > 0) { lock (said) said.Add(line.Trim()); Log.Write("  " + dd.Name + ": " + line.Trim()); }
             }, 600000); }
-            catch (Exception ex) { rc = -1; Log.Write(dd.Name + ": scan failed: " + ex.Message); }
+            catch (Exception ex) { rc = -1; said.Add(ex.Message); }
             items = items.Where(i => i.Bytes >= (1L << 20) || i.Id.StartsWith("docker-")).ToList();   // hide crumbs under 1 MB
             d.Items = items.OrderBy(i => i.Tier == "safe" ? 0 : 1).ThenByDescending(i => i.Bytes).ToList();
             d.Notes = notes; d.Os = os; d.Scanned = rc == 0; if (used >= 0) d.Used = used;
-            Log.Write(string.Format("{0}: {1} items, {2} safe, {3} to review", d.Name, items.Count,
-                Fmt.Size(items.Where(i => i.Tier == "safe").Sum(i => i.Bytes)), Fmt.Size(items.Where(i => i.Tier != "safe").Sum(i => i.Bytes))));
-            if (rc != 0) Log.Write(d.Name + ": scan exited with code " + rc);
+            if (rc == 0)
+                Log.Write(string.Format("{0}: {1} items, {2} safe, {3} to review", d.Name, items.Count,
+                    Fmt.Size(items.Where(i => i.Tier == "safe").Sum(i => i.Bytes)), Fmt.Size(items.Where(i => i.Tier != "safe").Sum(i => i.Bytes))));
+            else ReportDistroFailure(d, "scan", rc, spoke, said);
             return rc;
         }
 
         // Cleans (or previews) the picked items of one distro. onFreed receives the bytes freed inside the distro.
+        // A distro that never answered did not start: say so, with what WSL said, and how to look at its disk.
+        static void ReportDistroFailure(Distro d, string what, int rc, bool spoke, List<string> said)
+        {
+            string detail;
+            lock (said) detail = string.Join(" ", said.Where(x => x.Length > 0).Take(4));
+            if (detail.Length > 400) detail = detail.Substring(0, 400) + "…";
+            if (!spoke)
+            {
+                d.Error = "could not start " + d.Name + ": " + (detail.Length > 0 ? detail : "wsl.exe exit code " + rc);
+                Log.Write(d.Error);
+                if (d.VhdPath != null)
+                    Log.Write("  To look at its disk without changing anything, run in an administrator PowerShell: " + Compact.CheckCommand(d.VhdPath));
+            }
+            else
+            {
+                d.Error = what + " failed in " + d.Name + " (exit code " + rc + ")" + (detail.Length > 0 ? ": " + detail : "");
+                Log.Write(d.Error);
+            }
+        }
+
         public static int CleanDistro(Distro d, List<Item> picked, bool preview, Action<long> onFreed)
         {
             Log.Write("— " + d.Name + ": " + string.Join(", ", picked.Select(i => i.Title)));
             var ids = string.Join(" ", picked.Select(i => i.Id));
             var agent = Wsl.Agent(picked);
+            bool spoke = false; var said = new List<string>();
+            d.Error = null;
             int rc;
             try { rc = Wsl.Run("wsl.exe", "-d " + d.Name + " -u root -- sh -s " + (preview ? "preview " : "clean ") + ids, agent, line =>
             {
                 var f = line.Split('\t');
+                if (f[0] == "LOG" || f[0] == "INFO") spoke = true;
                 if (f[0] == "LOG" && f.Length >= 2) Log.Write(f[1]);
                 else if (f[0] == "INFO" && f.Length >= 3 && f[1] == "freed") { long b; if (long.TryParse(f[2], out b) && onFreed != null) onFreed(Math.Max(0, b)); }
                 else if (f[0] == "INFO" && f.Length >= 3 && f[1] == "used") { long b; if (long.TryParse(f[2], out b)) d.Used = b; }
-                else if (f[0] == "ERR") Log.Write("  " + line.Substring(4));
-                else if (line.Trim().Length > 0) Log.Write("  " + line.Trim());
+                else if (f[0] == "ERR") { lock (said) said.Add(line.Substring(4).Trim()); Log.Write("  " + line.Substring(4)); }
+                else if (line.Trim().Length > 0) { lock (said) said.Add(line.Trim()); Log.Write("  " + line.Trim()); }
             }, 3600000); }
-            catch (Exception ex) { rc = -1; Log.Write(d.Name + ": " + ex.Message); }
-            if (rc != 0) Log.Write(d.Name + ": cleanup exited with code " + rc);
+            catch (Exception ex) { rc = -1; said.Add(ex.Message); }
+            if (rc != 0) ReportDistroFailure(d, preview ? "preview" : "cleanup", rc, spoke, said);
             return rc;
         }
 
@@ -305,87 +358,10 @@ namespace Wslim
             return disks;
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint size);
-        // diskpart reads its script in the OEM code page; an 8.3 path avoids trouble with non-ASCII user names.
-        static string ShortPath(string path)
-        {
-            try
-            {
-                var sb = new StringBuilder(1024);
-                if (!File.Exists(path)) File.WriteAllText(path, "");
-                uint r = GetShortPathName(path, sb, (uint)sb.Capacity);
-                var sp = r > 0 && r < sb.Capacity ? sb.ToString() : path;
-                return sp.All(ch => ch < 128) ? sp : path;
-            }
-            catch { return path; }
-        }
-
-        // Shuts WSL down and runs diskpart elevated (one UAC prompt for all disks).
-        public static bool Shrink(List<Distro> disks)
-        {
-            Log.Write("Shutting WSL down…");
-            Wsl.Run("wsl.exe", "--shutdown", null, l => { }, 60000);
-            for (int i = 0; i < 30 && Wsl.RunningNames().Count > 0; i++) Thread.Sleep(1000);
-            Thread.Sleep(3000);
-
-            var tmp = Path.Combine(Path.GetTempPath(), "wslim");
-            Directory.CreateDirectory(tmp);
-            var output = Path.Combine(tmp, "shrink-out.txt");
-            var oem = Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
-            File.WriteAllText(output, "", oem);
-            var chain = new List<string>();
-            int n = 0;
-            foreach (var d in disks)
-            {
-                var file = Path.Combine(tmp, "shrink-" + (n++) + ".txt");
-                var vhd = ShortPath(d.VhdPath);
-                File.WriteAllText(file, "select vdisk file=\"" + vhd + "\"\r\nattach vdisk readonly\r\ncompact vdisk noerr\r\ndetach vdisk noerr\r\nexit\r\n", oem);
-                chain.Add("diskpart /s \"" + ShortPath(file) + "\" >> \"" + ShortPath(output) + "\" 2>&1");
-            }
-            var script = string.Join(" & ", chain);
-
-            foreach (var d in disks) Log.Write(string.Format("Shrinking {0} ({1})…", d.Name, Fmt.Size(d.FileSize)));
-            try
-            {
-                var psi = new ProcessStartInfo("cmd.exe", "/c " + script)
-                { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
-                using (var p = Process.Start(psi))
-                {
-                    p.WaitForExit();
-                    if (File.Exists(output))
-                        foreach (var l in File.ReadAllLines(output, oem))
-                            if (l.Trim().Length > 0 && !l.StartsWith("Microsoft DiskPart") && !l.StartsWith("Copyright") && !l.StartsWith("On computer"))
-                                Log.Write("    " + l.Trim());
-                    if (p.ExitCode != 0) { Log.Write("diskpart reported an error (code " + p.ExitCode + "); see the lines above."); return false; }
-                }
-            }
-            catch (Win32Exception ex)
-            {
-                if (ex.NativeErrorCode == 1223) { Log.Write("Shrinking cancelled: administrator permission was not given."); return false; }
-                Log.Write("Could not start diskpart: " + ex.Message); return false;
-            }
-            foreach (var d in disks)
-            {
-                long old = d.FileSize; long now = new FileInfo(d.VhdPath).Length;
-                Log.Write(string.Format("{0}: {1} → {2}", d.Name, Fmt.Size(old), Fmt.Size(now)));
-            }
-            return true;
-        }
-
         public static void LogSparseSkipped(IEnumerable<Distro> list)
         {
             foreach (var d in list.Where(x => x.Sparse && x.HasDisk))
                 Log.Write(d.Name + ": disk is a sparse file, which Windows shrinks by itself; skipped.");
-        }
-
-        // "disks 40 GB → 12 GB, freed 28 GB on C:" or "freed 3 GB inside WSL", as shown and written to history.tsv.
-        public static string Summary(bool shrink, Dictionary<Distro, long> before, List<Distro> after, long freedInside)
-        {
-            long b = before.Where(kv => kv.Value > 0).Sum(kv => kv.Value);
-            long a = after.Where(d => before.ContainsKey(d) && before[d] > 0).Sum(d => d.FileSize);
-            return shrink
-                ? string.Format("disks {0} → {1}, freed {2} on C:", Fmt.Size(b), Fmt.Size(a), Fmt.Size(Math.Max(0, b - a)))
-                : string.Format("freed {0} inside WSL", Fmt.Size(freedInside));
         }
     }
 }

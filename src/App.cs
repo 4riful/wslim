@@ -1,5 +1,5 @@
 // wslim: finds what WSL can safely let go of, cleans it, and shrinks the virtual disks on C:.
-// The window (WPF). Scanning, cleaning and shrinking live in Core.cs, shared with wslim-cli.exe (Cli.cs).
+// The window (WPF). Scanning and cleaning live in Core.cs, shrinking in Compact.cs, shared with wslim-cli.exe (Cli.cs).
 // .NET Framework 4.8 (built into Windows 10/11), C# 5 so the compiler that ships with Windows can build it.
 using System;
 using System.Collections.Generic;
@@ -146,9 +146,12 @@ namespace Wslim
 
   <DockPanel>
     <Grid DockPanel.Dock='Top' Margin='28,22,28,14'>
-      <StackPanel>
-        <TextBlock Text='wslim' FontSize='20' FontWeight='SemiBold'/>
-        <TextBlock x:Name='Sub' Text='Finds what WSL can safely let go of, and shrinks its disks on Windows.' Foreground='{MUTED}' Margin='0,2,0,0'/>
+      <StackPanel Orientation='Horizontal'>
+        <Image x:Name='AppIcon' Width='32' Height='32' Margin='0,0,12,0' VerticalAlignment='Center' RenderOptions.BitmapScalingMode='HighQuality'/>
+        <StackPanel VerticalAlignment='Center'>
+          <TextBlock Text='wslim' FontSize='20' FontWeight='SemiBold'/>
+          <TextBlock x:Name='Sub' Text='Finds what WSL can safely let go of, and shrinks its disks on Windows.' Foreground='{MUTED}' Margin='0,2,0,0'/>
+        </StackPanel>
       </StackPanel>
       <Button x:Name='ScanBtn' Style='{StaticResource Btn}' Content='Scan' HorizontalAlignment='Right' VerticalAlignment='Center' MinWidth='88'/>
     </Grid>
@@ -193,7 +196,12 @@ namespace Wslim
         readonly Border LogPane;
         List<Distro> Distros = new List<Distro>();
         bool busy;
+        bool blocked;                 // recovery required: scan, clean and shrink stay off until the disk state is checked
+        List<string> recoveryLines;   // what the recovery panel shows while blocked
+        string recoveryNote;          // result of the last "Check disk state"
         string resultBanner;
+        Outcome resultOutcome;
+        readonly RealHost Host = new RealHost();
         public readonly ManualResetEventSlim ScanDone = new ManualResetEventSlim(false);
 
         public Window Window { get { return W; } }
@@ -215,8 +223,21 @@ namespace Wslim
 
             try
             {
+                // One decoder for the embedded icon: the largest frame for the window and taskbar (Windows takes the
+                // other sizes from the same decoder), and the frame closest to 64 px for the header image.
                 using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("wslim.ico"))
-                    if (s != null) W.Icon = BitmapFrame.Create(s, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                {
+                    if (s != null)
+                    {
+                        var dec = BitmapDecoder.Create(s, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                        if (dec.Frames.Count > 0)
+                        {
+                            W.Icon = dec.Frames.OrderByDescending(f => f.PixelWidth).First();
+                            var img = (Image)W.FindName("AppIcon");
+                            img.Source = dec.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 64)).ThenByDescending(f => f.PixelWidth).First();
+                        }
+                    }
+                }
             }
             catch { }
 
@@ -235,7 +256,7 @@ namespace Wslim
             W.SourceInitialized += (s, e) => DarkTitleBar();
             W.Closing += (s, e) =>
             {
-                if (busy && !Unattended && MessageBox.Show(W, "wslim is still working. Closing now may leave a disk half shrunk.\n\nClose anyway?",
+                if (busy && !Unattended && MessageBox.Show(W, "wslim is still working. If a disk is being shrunk, that continues in the background and wslim will ask you to check the disk at its next start.\n\nClose anyway?",
                         "wslim", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) e.Cancel = true;
             };
             W.Loaded += (s, e) => Start();
@@ -262,7 +283,7 @@ namespace Wslim
         void SetBusy(bool b, string status)
         {
             busy = b;
-            ScanBtn.IsEnabled = CleanBtn.IsEnabled = PreviewBtn.IsEnabled = ShrinkChk.IsEnabled = !b;
+            ScanBtn.IsEnabled = CleanBtn.IsEnabled = PreviewBtn.IsEnabled = ShrinkChk.IsEnabled = !b && !blocked;
             foreach (var d in Distros) foreach (var i in d.Items) { var box = i.Box as CheckBox; if (box != null) box.IsEnabled = !b; }
             if (status != null) Status.Text = status;
             W.Cursor = b ? Cursors.AppStarting : null;
@@ -272,19 +293,99 @@ namespace Wslim
         void Start()
         {
             Log.Write("wslim started");
+            // An unfinished shrink blocks everything, and nothing (not even wsl.exe) is run until it is resolved.
+            var pending = Journal.Pending();
+            if (pending != null)
+            {
+                Log.Write("Recovery required: an earlier shrink did not end properly (" + Journal.FileIn(Log.Dir) + ").");
+                EnterRecovery(Compact.RecoveryLines(pending.Disks.Select(d => d.Path), pending.Disks.Any(d => d.AttachedByWslim)));
+                return;
+            }
+            LoadDistros();
+        }
+
+        void LoadDistros()
+        {
             try { Distros = Wsl.List(); }
             catch (Exception ex) { Log.Write("Could not read WSL distributions: " + ex.Message); }
             Render();
             var last = Log.LastHistory();
             Status.Text = Distros.Count == 0 ? "No WSL distributions found on this PC."
-                        : (last ?? "Press Scan to see what can be cleaned. Nothing changes until you press Clean.");
+                        : (last ?? "Press Scan to see what can be cleaned (a stopped distro is started for the scan). Nothing changes until you press Clean.");
             if (Distros.Any(d => d.Running && !d.Managed)) Scan();
             else ScanDone.Set();
         }
 
-        async void Scan()
+        // ---------------------------------------------------------------- recovery
+        void EnterRecovery(List<string> lines)
+        {
+            blocked = true; recoveryLines = lines; recoveryNote = null;
+            busy = false; W.Cursor = null;
+            ScanBtn.IsEnabled = CleanBtn.IsEnabled = PreviewBtn.IsEnabled = ShrinkChk.IsEnabled = false;
+            ShowLog(true);
+            Render();
+            Status.Text = "Recovery required. Scan, clean and shrink are off until the disk state is checked.";
+            ScanDone.Set();
+        }
+
+        void RenderRecovery()
+        {
+            var head = Text("Recovery required", "BAD", 15, FontWeights.SemiBold);
+            head.Margin = new Thickness(0, 10, 0, 8);
+            Body.Children.Add(head);
+            var box = new TextBox
+            {
+                Text = string.Join(Environment.NewLine, recoveryLines ?? new List<string>()), IsReadOnly = true, TextWrapping = TextWrapping.Wrap,
+                FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, Padding = new Thickness(12),
+                Background = T.B("SURFACE"), Foreground = T.B("TEXT"), BorderBrush = T.B("LINE"), BorderThickness = new Thickness(1)
+            };
+            Body.Children.Add(box);
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
+            var check = new Button { Content = "Check disk state", Style = (Style)W.FindResource("Primary"), MinWidth = 140, Margin = new Thickness(0, 0, 8, 0), IsEnabled = !busy };
+            check.Click += (s, e) => CheckRecovery();
+            var copy = new Button { Content = "Copy commands", Style = (Style)W.FindResource("Btn"), MinWidth = 120 };
+            copy.Click += (s, e) =>
+            {
+                try { Clipboard.SetText(string.Join(Environment.NewLine, (recoveryLines ?? new List<string>()).Where(l => l.StartsWith("  ")).Select(l => l.Trim()))); Status.Text = "Commands copied."; }
+                catch (Exception ex) { Status.Text = "Could not copy: " + ex.Message; }
+            };
+            row.Children.Add(check); row.Children.Add(copy);
+            Body.Children.Add(row);
+            var hint = Text("“Check disk state” only reads whether the disk is attached to Windows. It changes nothing. When no disk is attached, wslim unblocks itself.", "MUTED", 12);
+            hint.Margin = new Thickness(0, 10, 0, 0);
+            Body.Children.Add(hint);
+            if (recoveryNote != null) { var note = Text(recoveryNote, "WARN", 12); note.Margin = new Thickness(0, 10, 0, 0); Body.Children.Add(note); }
+        }
+
+        async void CheckRecovery()
         {
             if (busy) return;
+            busy = true; W.Cursor = Cursors.AppStarting;
+            Status.Text = "Checking the disk state (read-only)…";
+            Render();
+            var lines = new List<string>();
+            bool cleared = false;
+            try { cleared = await Task.Run(() => Compact.RecoverCheck(Host, lines)); }
+            catch (Exception ex) { Log.Crash(ex); lines.Add("The check itself failed: " + ex.Message); }
+            busy = false; W.Cursor = null;
+            if (cleared)
+            {
+                blocked = false; recoveryLines = null; recoveryNote = null; resultBanner = null;
+                SetBusy(false, null);
+                LoadDistros();
+                Status.Text = "Checked: no disk is attached to Windows. wslim is unblocked.";
+            }
+            else
+            {
+                recoveryNote = string.Join(Environment.NewLine, lines);
+                Render();
+                Status.Text = "Still blocked: a disk is attached, or its state could not be read.";
+            }
+        }
+
+        async void Scan()
+        {
+            if (busy || blocked) return;
             var targets = Distros.Where(d => !d.Managed).ToList();
             if (targets.Count == 0) { ScanDone.Set(); return; }
             resultBanner = null;
@@ -312,35 +413,37 @@ namespace Wslim
             Render();
             SetBusy(false, null);
             UpdateFooter();
-            if (Distros.Any(x => !x.Managed && !x.Scanned)) Status.Text = "Some distributions could not be scanned. See the log.";
+            var notScanned = Distros.Where(x => !x.Managed && !x.Scanned).ToList();
+            if (notScanned.Count > 0) Status.Text = "Scan failed: " + string.Join("; ", notScanned.Select(x => x.Error ?? "could not scan " + x.Name)) + " · see the log";
             ScanDone.Set();
         }
 
         async void Clean(bool preview)
         {
-            if (busy) return;
+            if (busy || blocked) return;
             var picked = Distros.SelectMany(d => d.Items).Where(Ticked).ToList();
-            bool shrink = !preview && ShrinkChk.IsChecked == true;
+            bool wantShrink = ShrinkChk.IsChecked == true;
+            bool shrink = !preview && wantShrink;
             if (picked.Count == 0 && !shrink)
             {
                 Status.Text = preview ? "Select something to preview." : "Nothing selected. Tick items, or turn on “Shrink disks afterwards”.";
                 return;
             }
             bool dockerDesktop = Core.DockerDesktopRunning();
-            var disks = Core.ShrinkTargets(Distros, shrink && dockerDesktop);
+            var disks = Core.ShrinkTargets(Distros, wantShrink && dockerDesktop);
 
             if (!preview)
             {
                 var msg = new StringBuilder();
                 if (picked.Count > 0) msg.AppendLine(string.Format("Clean {0} item(s), about {1}.", picked.Count, Fmt.Size(picked.Sum(i => i.Bytes))));
-                if (shrink)
+                if (shrink && disks.Count == 0) { msg.AppendLine(); msg.AppendLine("There is no disk to shrink, so WSL is not stopped."); }
+                else if (shrink)
                 {
                     msg.AppendLine();
-                    var running = Wsl.RunningNames();
-                    msg.AppendLine("Then WSL must stop so its disks can be shrunk." + (running.Count > 0 ? " Running now: " + string.Join(", ", running) + "." : " No distro is running right now."));
-                    msg.AppendLine("Claude Code, VS Code, terminals and containers running in WSL will close, so save your work first.");
-                    msg.AppendLine();
-                    msg.AppendLine("Windows will ask for administrator permission (needed to shrink the disks).");
+                    msg.AppendLine("Then shrink: " + string.Join(", ", disks.Select(d => d.Name)) + ".");
+                    bool ok;
+                    var running = Wsl.RunningNames(out ok);
+                    foreach (var l in Compact.ConsentLines(running, ok)) { msg.AppendLine(); msg.AppendLine(l); }
                     if (dockerDesktop) { msg.AppendLine(); msg.AppendLine("Docker Desktop is running, so its disk is skipped. Quit it first to include it."); }
                 }
                 if (MessageBox.Show(W, msg.ToString().Trim(), "wslim", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
@@ -348,48 +451,38 @@ namespace Wslim
 
             ShowLog(true);
             SetBusy(true, preview ? "Previewing…" : "Cleaning…");
-            var before = Distros.ToDictionary(d => d, d => d.FileSize);
-            long freedInside = 0;
-            bool failed = false;
-            var okDistros = new HashSet<Distro>();
-
-            try { await Task.Run(() =>
+            OpResult r = null;
+            try { r = await Task.Run(() =>
             {
-                Log.Write(preview ? "Preview (nothing is changed)" : "Clean started");
-                foreach (var g in picked.GroupBy(i => i.Distro))
-                {
-                    var d = g.Key;
-                    int rc = Core.CleanDistro(d, g.ToList(), preview, b => Interlocked.Add(ref freedInside, b));
-                    if (rc != 0) failed = true;
-                    else lock (okDistros) okDistros.Add(d);
-                }
-                if (preview)
-                {
-                    if (ShrinkWanted()) Log.Write("Would then shut WSL down and shrink: " + string.Join(", ", disks.Select(d => d.Name)));
-                    Log.Write("Preview finished. Nothing was changed.");
-                    return;
-                }
-                if (picked.Count > 0) Log.Write("Freed inside WSL: " + Fmt.Size(freedInside));
-                if (shrink && disks.Count > 0) { if (!Core.Shrink(disks)) failed = true; }
-                Core.LogSparseSkipped(Distros);
-                Wsl.Refresh(Distros);
+                if (shrink) Core.LogSparseSkipped(Distros);
+                var x = Operation.Execute(Host, picked, preview, wantShrink, disks, Compact.CurrentMode(), Core.CleanDistro);
+                // While recovery is required nothing else is run, not even a status query to wsl.exe.
+                if (!preview && x.Outcome != Outcome.RecoveryRequired) Wsl.Refresh(Distros);
+                return x;
             }); }
-            catch (Exception ex) { Log.Crash(ex); Log.Write("Error: " + ex.Message); }
+            catch (Exception ex) { Log.Crash(ex); Log.Write("Unexpected error: " + ex.Message); }
 
-            if (!preview)
+            if (r == null)
             {
-                var summary = Core.Summary(shrink, before, Distros, freedInside);
-                Log.Write("Done: " + summary);
-                Log.History(summary + (failed ? " (with errors)" : ""));
-                resultBanner = (failed ? "Finished with errors · " : "Done · ") + summary;
-                foreach (var d in Distros) { var dd = d; if (okDistros.Contains(dd)) dd.Items = dd.Items.Where(i => !picked.Contains(i)).ToList(); }
+                // The operation broke off. If a journal is left, the disk state is unknown.
+                var pending = Journal.Pending();
+                if (pending != null) { EnterRecovery(Compact.RecoveryLines(pending.Disks.Select(d => d.Path), pending.Disks.Any(d => d.AttachedByWslim))); return; }
+                resultOutcome = Outcome.Failed;
+                resultBanner = "Failed · unexpected error, see the log";
                 Render();
+                SetBusy(false, resultBanner);
+                return;
             }
-            SetBusy(false, preview ? "Preview finished. Nothing was changed." : resultBanner);
-            if (!preview) UpdateFooter(resultBanner);
-        }
+            if (preview) { SetBusy(false, r.Detail); return; }
 
-        bool ShrinkWanted() { bool r = false; W.Dispatcher.Invoke(new Action(() => r = ShrinkChk.IsChecked == true)); return r; }
+            foreach (var d in Distros) { var dd = d; if (r.CleanedOk.Contains(dd)) dd.Items = dd.Items.Where(i => !picked.Contains(i)).ToList(); }
+            resultOutcome = r.Outcome;
+            resultBanner = r.Banner;
+            if (r.Outcome == Outcome.RecoveryRequired) { EnterRecovery(r.RecoveryLines); return; }
+            Render();
+            SetBusy(false, resultBanner);
+            UpdateFooter(resultBanner);
+        }
 
         // ---------------------------------------------------------------- rendering
         TextBlock Text(string s, string color, double size = 13, FontWeight? weight = null)
@@ -415,10 +508,13 @@ namespace Wslim
 
             if (resultBanner != null)
             {
-                var banner = Text(resultBanner, resultBanner.StartsWith("Done") ? "GOOD" : "WARN", 13, FontWeights.SemiBold);
+                string color = resultOutcome == Outcome.Success ? "GOOD"
+                             : (resultOutcome == Outcome.Failed || resultOutcome == Outcome.RecoveryRequired ? "BAD" : "WARN");
+                var banner = Text(resultBanner, color, 13, FontWeights.SemiBold);
                 banner.Margin = new Thickness(0, 6, 0, 0);
                 Body.Children.Add(banner);
             }
+            if (blocked) { RenderRecovery(); return; }
 
             Heading("Disks", 14);
             Rule();

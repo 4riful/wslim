@@ -18,6 +18,17 @@ jobs:
         shell: cmd
         run: build.cmd
 
+      # Fake host and temp files only: no DiskPart, no wsl.exe. Exit code = number of failed tests.
+      - name: Unit tests
+        shell: cmd
+        run: bin\wslim-tests.exe
+
+      # Real DiskPart on throw-away VHDX files in the runner's temp folder (the runner is elevated).
+      # Never runs wsl.exe and never touches a WSL distro.
+      - name: Integration tests (disposable VHDX)
+        shell: cmd
+        run: bin\wslim-tests.exe --integration "%RUNNER_TEMP%\wslim-it"
+
       - uses: actions/upload-artifact@v4
         with:
           name: wslim

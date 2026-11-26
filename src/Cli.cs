@@ -1,4 +1,5 @@
-// wslim-cli: the console version of wslim. Same scan, clean and shrink as the window (Core.cs).
+// wslim-cli: the console version of wslim. Same scan, clean and shrink as the window (Core.cs, Compact.cs).
+// It is also the elevated worker that the window and the console start for the disk work (--compact-worker).
 // .NET Framework 4.8, C# 5 so the compiler that ships with Windows can build it.
 using System;
 using System.Collections.Generic;
@@ -18,6 +19,7 @@ Usage:
   wslim-cli scan   [--distro NAME] [--json]
   wslim-cli clean  [--safe | --ids a,b,c] [--distro NAME] [--shrink] [--preview] [--yes]
   wslim-cli shrink [--distro NAME] [--yes]
+  wslim-cli recover
   wslim-cli --help | --version
 
 Commands:
@@ -25,18 +27,22 @@ Commands:
   clean    Clean the selected items. By default all items marked safe (--safe).
            Items marked review are only cleaned when named with --ids.
            An id selects that item in every scanned distribution (narrow with --distro).
-  shrink   Shut WSL down and compact the virtual disks (asks for administrator permission).
+  shrink   Shut WSL down (all distros), compact the virtual disks (asks for administrator
+           permission), check every disk, then start the distros again.
+  recover  After a shrink that did not end properly: check (read-only) whether a disk is still
+           attached to Windows, and unblock wslim when none is.
 
 Options:
   --distro NAME  Only this distribution.
   --json         Machine-readable output (scan).
   --safe         Select all safe items (the default for clean).
   --ids a,b,c    Select these item ids (see scan). Can include review items.
-  --shrink       After cleaning, shut WSL down and compact the disks.
+  --shrink       After cleaning, shut WSL down (all distros) and compact the disks.
   --preview      Show what clean would do. Nothing is changed.
   --yes, -y      Do not ask for confirmation.
 
-Exit codes: 0 ok, 1 error or cancelled, 2 usage.
+Exit codes: 0 success or no space reclaimed, 1 failed, partial success or cancelled, 2 usage,
+            3 recovery required.
 Logs: {1}";
 
         static bool outCon, errCon;   // stdout / stderr is a console: dim text allowed, plain characters only
@@ -45,6 +51,16 @@ Logs: {1}";
         static int Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Log.Crash(e.ExceptionObject as Exception ?? new Exception("unknown"));
+            // Hidden mode: the elevated worker for the disk work. Started only by wslim itself (Compact.cs).
+            if (args.Length > 0 && args[0] == "--compact-worker")
+            {
+                try
+                {
+                    if (args.Length != 2) return Compact.WorkerRefused;
+                    return Compact.WorkerMain(new RealHost(), args[1]);
+                }
+                catch (Exception ex) { Log.Crash(ex); Log.Write("[worker] unexpected error: " + ex.Message); return 1; }
+            }
             SetupOutput();
             try { return Run(args); }
             catch (Exception ex)
@@ -131,14 +147,25 @@ Logs: {1}";
                         o.Command = a; break;
                 }
             }
-            if (o.Command == null) return UsageError("missing command (scan, clean or shrink)");
-            if (o.Command != "scan" && o.Command != "clean" && o.Command != "shrink") return UsageError("unknown command " + o.Command);
+            if (o.Command == null) return UsageError("missing command (scan, clean, shrink or recover)");
+            if (o.Command != "scan" && o.Command != "clean" && o.Command != "shrink" && o.Command != "recover") return UsageError("unknown command " + o.Command);
             if (o.Json && o.Command != "scan") return UsageError("--json only works with scan");
             if (o.Command != "clean" && (o.Safe || o.Ids != null || o.Shrink || o.Preview))
                 return UsageError("--safe, --ids, --shrink and --preview only work with clean");
             if (o.Safe && o.Ids != null) return UsageError("use either --safe or --ids, not both");
 
+            if (o.Command == "recover" && (o.Distro != null || o.Yes)) return UsageError("recover takes no options");
+
             Log.Write("wslim-cli " + string.Join(" ", args));
+            if (o.Command == "recover") return RecoverCmd();
+            // An unfinished shrink blocks everything, and nothing (not even wsl.exe) is run until it is resolved.
+            var pending = Journal.Pending();
+            if (pending != null)
+            {
+                Log.Write("Recovery required: an earlier shrink did not end properly (" + Journal.FileIn(Log.Dir) + ").");
+                foreach (var l in Compact.RecoveryLines(pending.Disks.Select(d => d.Path), pending.Disks.Any(d => d.AttachedByWslim))) Err.WriteLine(Text(l));
+                return Report.ExitCode(Outcome.RecoveryRequired);
+            }
             List<Distro> all;
             try { all = Wsl.List(); }
             catch (Exception ex) { Log.Write("Could not read WSL distributions: " + ex.Message); Err.WriteLine("wslim-cli: could not read WSL distributions: " + ex.Message); return 1; }
@@ -186,8 +213,8 @@ Logs: {1}";
             Wsl.Refresh(list);
             Log.Sink = null;
             var failed = targets.Where(d => !d.Scanned).ToList();
-            if (failed.Count > 0)
-                Err.WriteLine(Text("Could not scan: " + string.Join(", ", failed.Select(d => d.Name)) + ". See the log in " + Log.LogDir));
+            foreach (var d in failed) Err.WriteLine(Text("Scan failed: " + (d.Error ?? "could not scan " + d.Name)));
+            if (failed.Count > 0) Err.WriteLine(Text("See the log in " + Log.LogDir));
             return failed.Count == 0;
         }
 
@@ -275,45 +302,50 @@ Logs: {1}";
             {
                 if (disks.Count == 0) Out.WriteLine("  No disk to shrink.");
                 else Out.WriteLine(Text("  Then shut WSL down and shrink: " + string.Join(", ", disks.Select(d => d.Name + " (" + Fmt.Size(d.FileSize) + ")"))));
-                if (!o.Preview)
-                {
-                    RunningLine();
-                    Muted(Out, "  Claude Code, VS Code, terminals and containers running in WSL will close, so save your work first.");
-                    Muted(Out, "  Windows will ask for administrator permission (needed to shrink the disks).");
-                }
+                if (!o.Preview && disks.Count > 0) Consent();
                 if (dockerDesktop) Muted(Out, "  Docker Desktop is running, so its disk is skipped. Quit it first to include it.");
             }
             Out.WriteLine();
 
             if (!o.Preview && !Confirm(o.Yes)) { Out.WriteLine("Cancelled. Nothing was changed."); return 1; }
 
+            return Execute(list, picked, o.Preview, o.Shrink, disks);
+        }
+
+        // Runs the shared clean / preview / shrink flow and reports its outcome. The last line and the exit code
+        // come from the same outcome as the log line and history.tsv.
+        static int Execute(List<Distro> list, List<Item> picked, bool preview, bool shrink, List<Distro> disks)
+        {
             Log.Sink = line => Out.WriteLine(Text(line.Substring(10)));
-            var before = list.ToDictionary(d => d, d => d.FileSize);
-            long freedInside = 0;
-            bool failed = false;
-            Log.Write(o.Preview ? "Preview (nothing is changed)" : "Clean started");
-            foreach (var g in picked.GroupBy(i => i.Distro))
-                if (Core.CleanDistro(g.Key, g.ToList(), o.Preview, b => freedInside += b) != 0) failed = true;
-            if (o.Preview)
-            {
-                if (o.Shrink) Log.Write("Would then shut WSL down and shrink: " + string.Join(", ", disks.Select(d => d.Name)));
-                Log.Write("Preview finished. Nothing was changed.");
-                Log.Sink = null;
-                return failed ? 1 : 0;
-            }
-            if (picked.Count > 0) Log.Write("Freed inside WSL: " + Fmt.Size(freedInside));
-            bool shrink = o.Shrink && disks.Count > 0;
-            if (shrink && !Core.Shrink(disks)) failed = true;
-            if (o.Shrink) Core.LogSparseSkipped(list);
-            Wsl.Refresh(list);
-            return Finish(o.Shrink, before, list, freedInside, failed);
+            if (shrink && !preview) Core.LogSparseSkipped(list);
+            var r = Operation.Execute(new RealHost(), picked, preview, shrink, disks, Compact.CurrentMode(), Core.CleanDistro);
+            Log.Sink = null;
+            if (preview) return r.ExitCode;
+            Out.WriteLine();
+            Out.WriteLine(Text(r.LogLine));
+            foreach (var l in r.RecoveryLines) Out.WriteLine(Text(l));
+            return r.ExitCode;
         }
 
         // ---------------------------------------------------------------- shrink
-        static void RunningLine()
+        static void Consent()
         {
-            var running = Wsl.RunningNames();
-            Out.WriteLine(running.Count > 0 ? "  Running now (will be stopped): " + string.Join(", ", running) : "  No distro is running right now.");
+            bool ok;
+            var running = Wsl.RunningNames(out ok);
+            foreach (var l in Compact.ConsentLines(running, ok)) Muted(Out, "  " + l);
+        }
+
+        static int RecoverCmd()
+        {
+            var pending = Journal.Pending();
+            if (pending != null)
+                foreach (var l in Compact.RecoveryLines(pending.Disks.Select(d => d.Path), pending.Disks.Any(d => d.AttachedByWslim))) Out.WriteLine(Text(l));
+            Out.WriteLine();
+            Out.WriteLine("Checking (read-only)...");
+            var lines = new List<string>();
+            bool cleared = Compact.RecoverCheck(new RealHost(), lines);
+            foreach (var l in lines) Out.WriteLine(Text("  " + l));
+            return cleared ? 0 : Report.ExitCode(Outcome.RecoveryRequired);
         }
 
         static int ShrinkCmd(List<Distro> list, Opts o)
@@ -333,30 +365,12 @@ Logs: {1}";
             foreach (var d in disks) r.Add(new[] { d.Name, Size(d.FileSize), d.Running ? "running" : "stopped" });
             Table(r, new[] { false, true, false }, "  ");
             Out.WriteLine("  WSL must stop, then these disks are compacted.");
-            RunningLine();
-            Muted(Out, "  Claude Code, VS Code, terminals and containers running in WSL will close, so save your work first.");
-            Muted(Out, "  Windows will ask for administrator permission (needed to shrink the disks).");
+            Consent();
             if (dockerDesktop) Muted(Out, "  Docker Desktop is running, so its disk is skipped. Quit it first to include it.");
             Out.WriteLine();
             if (!Confirm(o.Yes)) { Out.WriteLine("Cancelled. Nothing was changed."); return 1; }
 
-            Log.Sink = line => Out.WriteLine(Text(line.Substring(10)));
-            var before = list.ToDictionary(d => d, d => d.FileSize);
-            bool failed = !Core.Shrink(disks);
-            Core.LogSparseSkipped(list);
-            Wsl.Refresh(list);
-            return Finish(true, before, list, 0, failed);
-        }
-
-        static int Finish(bool shrink, Dictionary<Distro, long> before, List<Distro> list, long freedInside, bool failed)
-        {
-            var summary = Core.Summary(shrink, before, list, freedInside);
-            Log.Write("Done: " + summary);
-            Log.History(summary + (failed ? " (with errors)" : ""));
-            Log.Sink = null;
-            Out.WriteLine();
-            Out.WriteLine(Text((failed ? "Finished with errors: " : "Done: ") + summary));
-            return failed ? 1 : 0;
+            return Execute(list, new List<Item>(), false, true, disks);
         }
 
         static bool Confirm(bool yes)
