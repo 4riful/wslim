@@ -1,5 +1,5 @@
-# Draws the wslim icon (same geometry as assets/wslim.svg): a blue tile with a terminal prompt ">_"
-# whose cursor is mint ("clean"), and a small sparkle. The sparkle is left out at 24 px and below.
+# Draws the wslim icon (same geometry as assets/wslim.svg): a tile cut diagonally. Linux half: a penguin.
+# Windows half: a terminal prompt with a mint "clean" cursor and a sparkle. Small sizes drop fine details.
 # Usage: powershell -File tools\make-icon.ps1 -Out assets\wslim.ico
 param([Parameter(Mandatory)][string]$Out)
 Add-Type -AssemblyName PresentationCore, WindowsBase
@@ -9,12 +9,28 @@ function Draw([int]$s) {
     $dv = New-Object System.Windows.Media.DrawingVisual
     $dc = $dv.RenderOpen()
     $dc.PushTransform((New-Object System.Windows.Media.ScaleTransform $k, $k))
-    $dc.DrawRoundedRectangle((Brush "#2563EB"), $null, [Windows.Rect]::new(2, 2, 60, 60), 14, 14)
-    $pen = New-Object System.Windows.Media.Pen (Brush "#FFFFFF"), 6
+    $dc.PushClip((New-Object System.Windows.Media.RectangleGeometry ([Windows.Rect]::new(2, 2, 60, 60)), 14, 14))
+    $small = $s -le 24
+    # Linux half: a penguin on pale amber
+    $dc.DrawGeometry((Brush "#FDE68A"), $null, [Windows.Media.Geometry]::Parse("M0,0 L61,0 L0,61 Z"))
+    $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(21, 25), 11, 14)
+    $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new(21, 29), 7, 9)
+    if (-not $small) {
+        foreach ($x in 18, 24) { $dc.DrawEllipse((Brush "#FFFFFF"), $null, [Windows.Point]::new($x, 17), 2.6, 2.6) }
+        $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(18.6, 17.4), 1.2, 1.2)
+        $dc.DrawEllipse((Brush "#111827"), $null, [Windows.Point]::new(23.4, 17.4), 1.2, 1.2)
+        $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(15.5, 39), 4.2, 2.2)
+        $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(26, 39), 4.2, 2.2)
+    }
+    $dc.DrawEllipse((Brush "#F59E0B"), $null, [Windows.Point]::new(21, 21.5), 3.6, 2.2)
+    # Windows half: terminal prompt, mint cursor, sparkle
+    $dc.DrawGeometry((Brush "#2563EB"), $null, [Windows.Media.Geometry]::Parse("M64,3 L64,64 L3,64 Z"))
+    $pen = New-Object System.Windows.Media.Pen (Brush "#FFFFFF"), ($(if ($small) { 5 } else { 4 }))
     $pen.StartLineCap = "Round"; $pen.EndLineCap = "Round"; $pen.LineJoin = "Round"
-    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M17,22 L29,32 L17,42"))
-    $dc.DrawRoundedRectangle((Brush "#6EE7B7"), $null, [Windows.Rect]::new(33, 39, 16, 6), 3, 3)
-    if ($s -gt 24) { $dc.DrawGeometry((Brush "#FFFFFF"), $null, [Windows.Media.Geometry]::Parse("M47,11 Q47,19 55,19 Q47,19 47,27 Q47,19 39,19 Q47,19 47,11 Z")) }
+    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M36,44 L43,50 L36,56"))
+    $dc.DrawRoundedRectangle((Brush "#6EE7B7"), $null, [Windows.Rect]::new(46, 52.5, 10, 4), 2, 2)
+    if (-not $small) { $dc.DrawGeometry((Brush "#FFFFFF"), $null, [Windows.Media.Geometry]::Parse("M53,30 Q53,36 59,36 Q53,36 53,42 Q53,36 47,36 Q53,36 53,30 Z")) }
+    $dc.Pop()
     $dc.Pop(); $dc.Close()
     $bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap $s, $s, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
     $bmp.Render($dv)

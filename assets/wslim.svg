@@ -1,7 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
   <title>wslim</title>
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="#2563EB"/>
-  <path d="M17 22 L29 32 L17 42" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="33" y="39" width="16" height="6" rx="3" fill="#6EE7B7"/>
-  <path d="M47 11 Q47 19 55 19 Q47 19 47 27 Q47 19 39 19 Q47 19 47 11 Z" fill="#FFFFFF"/>
+  <defs><clipPath id="tile"><rect x="2" y="2" width="60" height="60" rx="14"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <!-- Linux half: a penguin on pale amber -->
+    <polygon points="0,0 61,0 0,61" fill="#FDE68A"/>
+    <ellipse cx="21" cy="25" rx="11" ry="14" fill="#111827"/>
+    <ellipse cx="21" cy="29" rx="7" ry="9" fill="#FFFFFF"/>
+    <circle cx="18" cy="17" r="2.6" fill="#FFFFFF"/><circle cx="24" cy="17" r="2.6" fill="#FFFFFF"/>
+    <circle cx="18.6" cy="17.4" r="1.2" fill="#111827"/><circle cx="23.4" cy="17.4" r="1.2" fill="#111827"/>
+    <ellipse cx="21" cy="21.5" rx="3.6" ry="2.2" fill="#F59E0B"/>
+    <ellipse cx="15.5" cy="39" rx="4.2" ry="2.2" fill="#F59E0B"/><ellipse cx="26" cy="39" rx="4.2" ry="2.2" fill="#F59E0B"/>
+    <!-- Windows half: a terminal prompt with a clean mint cursor and a sparkle -->
+    <polygon points="64,3 64,64 3,64" fill="#2563EB"/>
+    <path d="M36 44 L43 50 L36 56" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="46" y="52.5" width="10" height="4" rx="2" fill="#6EE7B7"/>
+    <path d="M53 30 Q53 36 59 36 Q53 36 53 42 Q53 36 47 36 Q53 36 53 30 Z" fill="#FFFFFF"/>
+  </g>
 </svg>
