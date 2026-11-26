@@ -1,0 +1,4 @@
+bin/
+*.tmp
+assets/screenshot-*.png
+Thumbs.db
