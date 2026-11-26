@@ -7,5 +7,5 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -r src assets tools build.cmd "$STAGE/"
 [ -f assets/wslim.ico ] || (cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$STAGE/tools/make-icon.ps1")" -Out "$(wslpath -w "$STAGE/assets/wslim.ico")") && cp "$STAGE"/assets/wslim.* assets/
 (cd "$STAGE" && cmd.exe /c build.cmd)
-mkdir -p bin && cp "$STAGE/bin/wslim.exe" bin/
-ls -l bin/wslim.exe
+mkdir -p bin && cp "$STAGE/bin/wslim.exe" "$STAGE/bin/wslim-cli.exe" bin/
+ls -l bin/wslim.exe bin/wslim-cli.exe

@@ -1,10 +1,22 @@
 @echo off
-rem Builds bin\wslim.exe with the C# compiler that ships with Windows (.NET Framework 4.8).
+rem Builds bin\wslim.exe (window) and bin\wslim-cli.exe (console) with the C# compiler that ships
+rem with Windows (.NET Framework 4.8). Both share src\Core.cs.
 setlocal
 set FW=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319
 set WPF=%FW%\WPF
 cd /d "%~dp0"
 if not exist bin mkdir bin
-"%FW%\csc.exe" /nologo /target:winexe /optimize+ /langversion:5 /out:bin\wslim.exe /win32icon:assets\wslim.ico /win32manifest:src\app.manifest /resource:src\agent.sh,agent.sh /resource:assets\wslim.ico,wslim.ico /r:"%WPF%\PresentationFramework.dll" /r:"%WPF%\PresentationCore.dll" /r:"%WPF%\WindowsBase.dll" /r:"%FW%\System.Xaml.dll" /r:"%FW%\System.Xml.dll" src\App.cs
+rem The agent script is embedded gzip-compressed (about 7 KB instead of 20 KB).
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$b=[IO.File]::ReadAllBytes('src\agent.sh'); $f=[IO.File]::Create('bin\agent.sh.gz'); $z=New-Object IO.Compression.GZipStream($f,[IO.Compression.CompressionLevel]::Optimal); $z.Write($b,0,$b.Length); $z.Close(); $f.Close()"
+if errorlevel 1 exit /b 1
+set COMMON=/nologo /optimize+ /langversion:5 /win32manifest:src\app.manifest /resource:bin\agent.sh.gz,agent.sh.gz
+"%FW%\csc.exe" %COMMON% /target:winexe /out:bin\wslim.exe /win32icon:assets\wslim.ico /resource:assets\wslim.ico,wslim.ico /r:"%WPF%\PresentationFramework.dll" /r:"%WPF%\PresentationCore.dll" /r:"%WPF%\WindowsBase.dll" /r:"%FW%\System.Xaml.dll" /r:"%FW%\System.Xml.dll" src\App.cs src\Scramble.cs src\Core.cs
 if errorlevel 1 exit /b 1
 echo built bin\wslim.exe
+rem The console exe gets the same icon with only its small frames (a console never shows 64 or 256 px).
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\small-icon.ps1 -In assets\wslim.ico -Out bin\wslim-cli.ico
+if errorlevel 1 exit /b 1
+"%FW%\csc.exe" %COMMON% /target:exe /out:bin\wslim-cli.exe /win32icon:bin\wslim-cli.ico src\Cli.cs src\Core.cs
+if errorlevel 1 exit /b 1
+del bin\agent.sh.gz bin\wslim-cli.ico
+echo built bin\wslim-cli.exe

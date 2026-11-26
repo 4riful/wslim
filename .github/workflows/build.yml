@@ -21,13 +21,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wslim
-          path: bin/wslim.exe
+          path: |
+            bin/wslim.exe
+            bin/wslim-cli.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/wslim.exe
+          files: |
+            bin/wslim.exe
+            bin/wslim-cli.exe
 
   lint:
     runs-on: ubuntu-latest

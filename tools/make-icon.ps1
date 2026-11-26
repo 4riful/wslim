@@ -1,18 +1,21 @@
-# Draws the wslim icon: a flat blue tile with three bars that get shorter (a disk getting slimmer).
+# Draws the wslim icon (same geometry as assets/wslim.svg): a blue tile with a terminal prompt ">_"
+# whose cursor is mint ("clean"), and a small sparkle. The sparkle is left out at 24 px and below.
 # Usage: powershell -File tools\make-icon.ps1 -Out assets\wslim.ico
 param([Parameter(Mandatory)][string]$Out)
 Add-Type -AssemblyName PresentationCore, WindowsBase
+function Brush($hex) { $b = New-Object System.Windows.Media.SolidColorBrush ([Windows.Media.ColorConverter]::ConvertFromString($hex)); $b.Freeze(); $b }
 function Draw([int]$s) {
     $k = $s / 64.0
     $dv = New-Object System.Windows.Media.DrawingVisual
     $dc = $dv.RenderOpen()
-    $blue  = New-Object System.Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb(0x24, 0x63, 0xEB))
-    $white = [Windows.Media.Brushes]::White
-    $dc.DrawRoundedRectangle($blue, $null, [Windows.Rect]::new(2*$k, 2*$k, 60*$k, 60*$k), 14*$k, 14*$k)
-    foreach ($b in @(@(14, 18, 36), @(14, 29, 26), @(14, 40, 16))) {
-        $dc.DrawRoundedRectangle($white, $null, [Windows.Rect]::new($b[0]*$k, $b[1]*$k, $b[2]*$k, 6*$k), 3*$k, 3*$k)
-    }
-    $dc.Close()
+    $dc.PushTransform((New-Object System.Windows.Media.ScaleTransform $k, $k))
+    $dc.DrawRoundedRectangle((Brush "#2563EB"), $null, [Windows.Rect]::new(2, 2, 60, 60), 14, 14)
+    $pen = New-Object System.Windows.Media.Pen (Brush "#FFFFFF"), 6
+    $pen.StartLineCap = "Round"; $pen.EndLineCap = "Round"; $pen.LineJoin = "Round"
+    $dc.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse("M17,22 L29,32 L17,42"))
+    $dc.DrawRoundedRectangle((Brush "#6EE7B7"), $null, [Windows.Rect]::new(33, 39, 16, 6), 3, 3)
+    if ($s -gt 24) { $dc.DrawGeometry((Brush "#FFFFFF"), $null, [Windows.Media.Geometry]::Parse("M47,11 Q47,19 55,19 Q47,19 47,27 Q47,19 39,19 Q47,19 47,11 Z")) }
+    $dc.Pop(); $dc.Close()
     $bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap $s, $s, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
     $bmp.Render($dv)
     $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
@@ -32,4 +35,19 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Close()
 [IO.File]::WriteAllBytes([IO.Path]::ChangeExtension($Out, ".png"), (Draw 256))
+# contact sheet for checking small sizes on light and dark backgrounds
+$sheet = New-Object System.Windows.Media.DrawingVisual; $dc = $sheet.RenderOpen()
+$dc.DrawRectangle((Brush "#F3F3F3"), $null, [Windows.Rect]::new(0, 0, 420, 90)); $dc.DrawRectangle((Brush "#202020"), $null, [Windows.Rect]::new(0, 90, 420, 90))
+$x = 10
+foreach ($s in 16, 20, 24, 32, 48, 64) {
+    foreach ($y in 10, 100) {
+        $ms = New-Object IO.MemoryStream (,(Draw $s)); $img = [System.Windows.Media.Imaging.BitmapFrame]::Create($ms)
+        $dc.DrawImage($img, [Windows.Rect]::new($x, $y + (64 - $s) / 2, $s, $s))
+    }
+    $x += $s + 24
+}
+$dc.Close()
+$bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap 420, 180, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32); $bmp.Render($sheet)
+$enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder; $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bmp))
+$f = [IO.File]::Create([IO.Path]::Combine([IO.Path]::GetDirectoryName($Out), "icon-sizes.png")); $enc.Save($f); $f.Close()
 "wrote $Out"
