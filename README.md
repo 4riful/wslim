@@ -10,8 +10,8 @@
 > [incident report](WSLIM_COMPACTION_INCIDENT_REPORT.md).
 
 <p align="center">
-  <a href="https://github.com/4riful/wslim/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/4riful/wslim"></a>
-  <a href="https://github.com/4riful/wslim/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/4riful/wslim/total"></a>
+  <a href="https://github.com/4riful/wslim/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/4riful/wslim?cacheSeconds=300&v=122"></a>
+  <a href="https://github.com/4riful/wslim/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/4riful/wslim/total?cacheSeconds=300&v=122"></a>
   <img alt="Windows Home supported" src="https://img.shields.io/badge/Windows%20Home-supported-0d9488">
   <img alt="Size" src="https://img.shields.io/badge/size-189%20KB-0d9488">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/github/license/4riful/wslim"></a>
